@@ -1,4 +1,5 @@
 import asyncio
+import os
 from consensus.poa.p2p import Peer as PoAPeer
 from consensus.pos.p2p import Peer as PoSPeer
 from consensus.pow.p2p import Peer as PoWPeer
@@ -6,34 +7,97 @@ from consensus.poa.mal_node import Peer as PoaMalPeer
 from consensus.pos.mal_node import Peer as PosMalPeer
 from consensus.pow.mal_node import Peer as PowMalPeer
 
+
+def get_env_or_input(name, prompt, cast=str):
+    value = os.getenv(name)
+    if value is not None:
+        return cast(value)
+    return cast(input(prompt))
+
+
+def get_bool(name, prompt):
+    value = os.getenv(name)
+
+    if value is not None:
+        value = value.strip().lower()
+        if value in ("true", "1", "yes", "y"):
+            return True
+        if value in ("false", "0", "no", "n"):
+            return False
+        raise ValueError(
+            f"{name} must be one of: true/false, 1/0, yes/no, y/n"
+        )
+
+    return input(prompt).strip().lower() == "y"
+
+
 def start_peer():
-    host = input("Enter Host: ")
-    port = int(input("Enter Port: "))
-    name = input("Enter Name: ")
-    consensus = input("Enter Consensus[poa/pos/pow] (default : pow): ")
-    activate_disk_load = input("Do you like to load saved data if any(y/n): ")
-    activate_disk_save = input("Do you like to continuously backup data to disk(y/n): ")
-    action = input("Enter 'create' to create a network, 'connect' to connect via host:port, or 'room' to join via signalling server using a room ID (default: create): ")
+    host = get_env_or_input("PEER_HOST", "Enter Host: ")
+    port = get_env_or_input("PEER_PORT", "Enter Port: ", int)
+    name = get_env_or_input("PEER_NAME", "Enter Name: ")
+
+    consensus = get_env_or_input(
+        "CONSENSUS",
+        "Enter Consensus[poa/pos/pow] (default : pow): "
+    ).strip().lower()
+
+    activate_disk_load = get_env_or_input(
+        "DISK_LOAD",
+        "Do you like to load saved data if any(y/n): "
+    )
+
+    activate_disk_save = get_env_or_input(
+        "DISK_SAVE",
+        "Do you like to continuously backup data to disk(y/n): "
+    )
+
+    action = get_env_or_input(
+        "ACTION",
+        "Enter 'create' to create a network, 'connect' to connect via host:port, or 'room' to join via signalling server using a room ID (default: create): "
+    ).strip().lower()
+    
+    if not consensus:
+        consensus = "pow"
+
+    if not action:
+        action = "create"
+
     bootstrap_host = None
     bootstrap_port = None
     signalling_host = None
     signalling_port = None
     room_id = None
+
     if action == "connect":
-        bootstrap_host = input("Enter host to connect: ")
-        bootstrap_port = int(input("Enter port to connect: "))
+        bootstrap_host = get_env_or_input(
+            "BOOTSTRAP_HOST",
+            "Enter host to connect: "
+        )
+        bootstrap_port = get_env_or_input(
+            "BOOTSTRAP_PORT",
+            "Enter port to connect: ",
+            int
+        )
+
     elif action == "room":
-        signalling_host = input("Enter signalling server host: ")
-        signalling_port = int(input("Enter signalling server port: "))
-        room_id = input("Enter room ID (share this with teammates to join the same network): ")
+        signalling_host = get_env_or_input(
+            "SIGNALLING_HOST",
+            "Enter signalling server host: "
+        )
+        signalling_port = get_env_or_input(
+            "SIGNALLING_PORT",
+            "Enter signalling server port: ",
+            int
+        )
+        room_id = get_env_or_input(
+            "ROOM_ID",
+            "Enter room ID (share this with teammates to join the same network): "
+        )
+
     peer = None
     if consensus == "poa":
-        mal=False
-        mal_raw_input = input("Malcious? (y/n) ").strip().lower()
-        if mal_raw_input == "y":
-            mal = True
-        elif mal_raw_input == "n":
-            mal = False
+        mal = get_bool("MALICIOUS", "Malicious? (y/n): ")
+        
         if(not mal):
             peer = PoAPeer(host, port, name, activate_disk_load, activate_disk_save)
         else:
@@ -42,42 +106,44 @@ def start_peer():
         peer.node_id_to_name_dict[peer.node_id] = peer.name.lower()
 
     elif consensus == "pos":
-        mal=False
-        mal_raw_input = input("Malcious? (y/n) ").strip().lower()
-        if mal_raw_input == "y":
-            mal = True
-        elif mal_raw_input == "n":
-            mal = False
-        
-        if(not mal):
-            staker = True
-            staker_raw_input = input("Staker? (y/n) ").strip().lower()
-            if staker_raw_input == "y":
-                staker = True
-            elif staker_raw_input == "n":
-                staker = False
-            peer = PoSPeer(host, port, name, staker, activate_disk_load, activate_disk_save)
-        else:
-            peer = PosMalPeer(host, port, name, True, activate_disk_load, activate_disk_save)
+        mal = get_bool("MALICIOUS", "Malicious? (y/n): ")
 
-    else:        
-        mal=False
-        mal_raw_input = input("Malcious? (y/n) ").strip().lower()
-        if mal_raw_input == "y":
-            mal = True
-        elif mal_raw_input == "n":
-            mal = False
-        
-        if(not mal):
-            miner = True
-            miner_raw_input = input("Miner? (y/n) ").strip().lower()
-            if miner_raw_input == "y":
-                miner = True
-            elif miner_raw_input == "n":
-                miner = False
-            peer = PoWPeer(host, port, name, miner, activate_disk_load, activate_disk_save)
+        if not mal:
+            staker = get_bool("STAKER", "Staker? (y/n): ")
+
+            peer = PoSPeer(
+                host, port, name,
+                staker,
+                activate_disk_load,
+                activate_disk_save
+            )
         else:
-            peer = PowMalPeer(host, port, name, True, activate_disk_load, activate_disk_save)
+            peer = PosMalPeer(
+                host, port, name,
+                True,
+                activate_disk_load,
+                activate_disk_save
+            )
+
+    else:
+        mal = get_bool("MALICIOUS", "Malicious? (y/n): ")
+
+        if not mal:
+            miner = get_bool("MINER", "Miner? (y/n): ")
+
+            peer = PoWPeer(
+                host, port, name,
+                miner,
+                activate_disk_load,
+                activate_disk_save
+            )
+        else:
+            peer = PowMalPeer(
+                host, port, name,
+                True,
+                activate_disk_load,
+                activate_disk_save
+            )
 
 
     try:
