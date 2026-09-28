@@ -736,7 +736,7 @@ class Peer:
                     return
 
                 threshold = (staked_amt / total_amt_staked_2) * MAX_OUTPUT
-                if vrf_output_int <= threshold:
+                if vrf_output_int > threshold:
                     raise VrfThresholdException("VRF_Output is not less than threshold")
                 newBlock.seed = Chain.instance.epoch_seed()
                 newBlock.vrf_output = vrf_output
@@ -924,7 +924,7 @@ class Peer:
         err1, err2=False, False
 
         try:
-            vk.verify(sign1, str(block2).encode())
+            vk.verify(sign1, str(block1).encode())
         except BadSignatureError:
             print("\nBad signature on block 1\n")
             err1=True
@@ -949,7 +949,7 @@ class Peer:
             "type":"slash_announcement",
             "id":str(uuid.uuid4()),
             "evidence1":block1.to_dict_with_stakers(),
-            "evidence2":block1.to_dict_with_stakers(),
+            "evidence2":block2.to_dict_with_stakers(),
             "block1_sign":base64.b64encode(block1.sign).decode(),
             "block2_sign":base64.b64encode(block2.sign).decode(),
             "pos":pos

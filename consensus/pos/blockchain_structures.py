@@ -302,7 +302,7 @@ class Chain(CommonChain):
         return -1
 
 def transaction_exists_in_block_list(blockList:List[Block], transaction_tc:Transaction, idx):
-    for i in range(idx-1):
+    for i in range(idx):
         currBlock=blockList[i]
         for transaction in currBlock.transactions:
             if(transaction.id==transaction_tc.id): 
