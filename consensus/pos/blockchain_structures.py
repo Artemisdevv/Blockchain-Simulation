@@ -122,8 +122,8 @@ def calc_balance_block_list(block_list:List[Block], publicKey, i, mem_pool:List[
                     bal-=transaction.payload
             elif transaction.receiver==publicKey:
                 bal+=transaction.payload
-        if block_list[i].creator==publicKey:
-            bal+=6 #Miner reward
+        if i!=0 and block_list[i].creator==publicKey:
+            bal+=6 #Miner reward (genesis block isn't mined, no reward for it)
     
     for transaction in mem_pool:
         if transaction.sender==publicKey:
@@ -255,8 +255,8 @@ class Chain(CommonChain):
                         bal-=transaction.payload
                 elif transaction.receiver==publicKey:
                     bal+=transaction.payload
-            if Chain.instance.chain[i].creator==publicKey:
-                bal+=6 #Miner reward
+            if i!=0 and Chain.instance.chain[i].creator==publicKey:
+                bal+=6 #Miner reward (genesis block isn't mined, no reward for it)
 
         if valid_chain_len<len(self.chain):
             for i in range(valid_chain_len, len(self.chain)):

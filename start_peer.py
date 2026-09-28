@@ -149,6 +149,9 @@ def start_peer():
     enable_api = (consensus == "pos" and not mal)
     api_port = port + 1000
 
+    enable_api = (consensus == "pos" and not mal)
+    api_port = port + 1000
+
     try:
         asyncio.run(run_peer(
             peer, action, bootstrap_host, bootstrap_port,
