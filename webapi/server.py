@@ -7,8 +7,18 @@ with asyncio.run_coroutine_threadsafe() for anything that mutates state or
 broadcasts a message. Plain reads (chain/peers/mempool/stakers/balance) just
 touch already-existing Python objects directly - safe enough for a demo
 given the GIL, no bridging needed for those.
+
+Auth: every route requires `Authorization: Bearer <token>`, where the token
+is generated fresh per process and printed to the console (and written to
+.webapi_token_<port>) at startup. Without this, anyone who can reach the
+port could move funds via POST /transactions with zero authentication -
+wallet balances/pubkeys aren't secret in a blockchain but spending coins on
+someone's behalf is, so this isn't optional even for a demo.
 """
 import asyncio
+import os
+import secrets
+import stat
 import threading
 from datetime import datetime
 
@@ -19,10 +29,22 @@ from consensus.pos.blockchain_structures import Chain
 
 EPOCH_TIME = 60  # kept in sync with consensus/pos/p2p.py's EPOCH_TIME
 
+# Same-machine dev origins only - not a trust boundary by itself (CORS is a
+# browser-only concept, curl/Postman ignore it entirely), just stops a
+# malicious website open in someone's browser from silently calling this API.
+_ALLOWED_ORIGIN_PATTERN = r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$"
 
-def create_app(peer, loop):
+
+def create_app(peer, loop, token):
     app = Flask(__name__)
-    CORS(app)
+    CORS(app, origins=_ALLOWED_ORIGIN_PATTERN, supports_credentials=False)
+
+    @app.before_request
+    def require_token():
+        auth = request.headers.get("Authorization", "")
+        provided = auth[len("Bearer "):] if auth.startswith("Bearer ") else None
+        if not provided or not secrets.compare_digest(provided, token):
+            return jsonify({"ok": False, "error": "missing or invalid bearer token"}), 401
 
     def run_coro(coro, timeout=10):
         future = asyncio.run_coroutine_threadsafe(coro, loop)
@@ -113,13 +135,29 @@ def run_api_server(peer, loop, http_port):
     inside the peer's running event loop (needs `loop` = the actual running
     loop, e.g. via asyncio.get_running_loop()) so run_coroutine_threadsafe
     targets the right loop.
+
+    Binds to 127.0.0.1 by default - set WEBAPI_HOST=0.0.0.0 explicitly
+    (e.g. inside a docker container reached only via published ports) to
+    expose it beyond localhost. Auth token is required regardless.
     """
-    app = create_app(peer, loop)
+    token = secrets.token_urlsafe(32)
+    token_path = f".webapi_token_{http_port}"
+    with open(token_path, "w") as f:
+        f.write(token)
+    try:
+        os.chmod(token_path, stat.S_IRUSR | stat.S_IWUSR)  # best-effort on Windows
+    except OSError:
+        pass
+
+    host = os.environ.get("WEBAPI_HOST", "127.0.0.1")
+    app = create_app(peer, loop, token)
 
     def _run():
-        app.run(host="0.0.0.0", port=http_port, threaded=True, use_reloader=False)
+        app.run(host=host, port=http_port, threaded=True, use_reloader=False)
 
     thread = threading.Thread(target=_run, daemon=True)
     thread.start()
-    print(f"\nWeb API listening on http://0.0.0.0:{http_port}\n")
+    print(f"\nWeb API listening on http://{host}:{http_port}")
+    print(f"Auth token (also in {token_path}): {token}")
+    print(f"Example: curl -H \"Authorization: Bearer {token}\" http://{host}:{http_port}/chain\n")
     return thread

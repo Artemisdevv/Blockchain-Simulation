@@ -12,6 +12,15 @@ Python objects directly.
 Enabled automatically for PoS peers (`start_peer.py`) on `peer_port + 1000`
 (e.g. peer on 5000 -> API on 6000).
 
+**Auth:** every request needs `Authorization: Bearer <token>`. The token is
+generated fresh per process, printed to the peer's console at startup, and
+written to `.webapi_token_<port>` next to the process (gitignored - never
+commit it). No token or a wrong one gets a 401.
+
+**Binding:** defaults to `127.0.0.1` only. Set env var `WEBAPI_HOST=0.0.0.0`
+to expose beyond localhost (e.g. inside a docker container reached only via
+a published port) - auth is still required either way.
+
 ## REST Endpoints
 
 ### `GET /chain`
