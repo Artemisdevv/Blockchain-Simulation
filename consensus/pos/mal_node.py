@@ -413,7 +413,7 @@ class Peer:
                 if self.activate_disk_save == "y":
                     self.save_known_peers_to_disk()
                 self.name_to_public_key_dict[data["name"].lower()]=data["public_key"]
-                print(f"Registered peer {data["name"]} {data["host"]}:{data["port"]}")
+                print(f"Registered peer {data['name']} {data['host']}:{data['port']}")
                 await self.send_known_peers(websocket)
                 pkt={
                     "type":"new_peer",
@@ -437,7 +437,7 @@ class Peer:
                 if self.activate_disk_save == "y":
                     self.save_known_peers_to_disk()
                 self.name_to_public_key_dict[data["name"].lower()]=data["public_key"]
-                print(f"Registered peer {data["name"]} {data["host"]}:{data["port"]}")
+                print(f"Registered peer {data['name']} {data['host']}:{data['port']}")
                 await self.broadcast_message(msg)
 
         elif t=="change_name":
