@@ -13,12 +13,19 @@ def start_peer():
     consensus = input("Enter Consensus[poa/pos/pow] (default : pow): ")
     activate_disk_load = input("Do you like to load saved data if any(y/n): ")
     activate_disk_save = input("Do you like to continuously backup data to disk(y/n): ")
-    action = input("Enter 'create' to create a network and 'connect' to connect to a network (default: create): ")
+    action = input("Enter 'create' to create a network, 'connect' to connect via host:port, or 'room' to join via signalling server using a room ID (default: create): ")
     bootstrap_host = None
     bootstrap_port = None
+    signalling_host = None
+    signalling_port = None
+    room_id = None
     if action == "connect":
         bootstrap_host = input("Enter host to connect: ")
         bootstrap_port = int(input("Enter port to connect: "))
+    elif action == "room":
+        signalling_host = input("Enter signalling server host: ")
+        signalling_port = int(input("Enter signalling server port: "))
+        room_id = input("Enter room ID (share this with teammates to join the same network): ")
     peer = None
     if consensus == "poa":
         mal=False
@@ -74,9 +81,40 @@ def start_peer():
 
 
     try:
-        asyncio.run(peer.start(bootstrap_host, bootstrap_port))
+        if action == "room":
+            asyncio.run(start_via_room(peer, signalling_host, signalling_port, room_id))
+        else:
+            asyncio.run(peer.start(bootstrap_host, bootstrap_port))
     except KeyboardInterrupt:
         print("\nShutting Down...")
+
+
+async def start_via_room(peer, signalling_host, signalling_port, room_id):
+    """
+    Joins the room and stays registered with the signalling server for the
+    peer's whole lifetime (same event loop as peer.start()), so nodes that
+    join later can still discover this one - not just a one-time snapshot.
+    """
+    from signalling.client import join_room
+
+    def on_new_peer(peer_info):
+        asyncio.create_task(peer.connect_to_peer(peer_info["host"], int(peer_info["port"])))
+
+    initial_peers, _ = await join_room(
+        signalling_host, signalling_port, room_id,
+        peer.host, peer.port, peer.name, peer.wallet.public_key_pem,
+        on_peer_joined=on_new_peer,
+    )
+
+    bootstrap_host = bootstrap_port = None
+    if initial_peers:
+        first = initial_peers[0]
+        bootstrap_host, bootstrap_port = first["host"], int(first["port"])
+        print(f"\nDiscovered {len(initial_peers)} peer(s) in room '{room_id}', bootstrapping off {first['name']} ({bootstrap_host}:{bootstrap_port})\n")
+    else:
+        print(f"\nFirst node in room '{room_id}' - starting a new network\n")
+
+    await peer.start(bootstrap_host, bootstrap_port)
 
 if __name__=="__main__":
     start_peer()
