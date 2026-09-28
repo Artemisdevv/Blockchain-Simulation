@@ -1,0 +1,22 @@
+# Get the IPFS/Kubo executable
+FROM ipfs/kubo:v0.43.1 AS ipfs
+
+# Python runtime
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Copy the IPFS CLI into the Python image
+COPY --from=ipfs /usr/local/bin/ipfs /usr/local/bin/ipfs
+
+# Install Python dependencies
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy application source
+COPY . .
+
+# Peer port
+EXPOSE 5000
+
+CMD ["python", "start_peer.py"]
