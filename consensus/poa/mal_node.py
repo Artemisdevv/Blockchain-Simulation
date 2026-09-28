@@ -482,7 +482,7 @@ class Peer:
                 self.name_to_public_key_dict[data["name"].lower()]=data["public_key"]
                 self.node_id_to_name_dict[data["node_id"]]=data["name"].lower()
                 self.name_to_node_id_dict[data["name"].lower()]=data["node_id"]
-                print(f"Registered peer {data["name"]} {data["host"]}:{data["port"]}")
+                print(f"Registered peer {data['name']} {data['host']}:{data['port']}")
                 message = self.get_known_peers_message()
                 await self.send_message(websocket, message, False)
 
@@ -508,7 +508,7 @@ class Peer:
                 self.name_to_public_key_dict[data["name"].lower()]=data["public_key"]
                 self.node_id_to_name_dict[data["node_id"]]=data["name"].lower()
                 self.name_to_node_id_dict[data["name"].lower()]=data["node_id"]
-                print(f"Registered peer {data["name"]} {data["host"]}:{data["port"]}")
+                print(f"Registered peer {data['name']} {data['host']}:{data['port']}")
                 message = self.get_known_peers_message()
                 await self.send_message(websocket, message, False)
                 pkt={
@@ -536,7 +536,7 @@ class Peer:
                 self.name_to_public_key_dict[data["name"].lower()]=data["public_key"]
                 self.node_id_to_name_dict[data["node_id"]]=data["name"].lower()
                 self.name_to_node_id_dict[data["name"].lower()]=data["node_id"]
-                print(f"Registered peer {data["name"]} {data["host"]}:{data["port"]}")
+                print(f"Registered peer {data['name']} {data['host']}:{data['port']}")
                 await self.broadcast_message(msg)
 
         elif t=="change_name":
@@ -555,7 +555,7 @@ class Peer:
                 normalized_self=normalize_endpoint((self.host, self.port))
                 normalized_endpoint = normalize_endpoint((peer["host"], peer["port"]))
                 if normalized_endpoint not in self.known_peers and normalized_endpoint!=normalized_self:
-                    print(f"Discovered peer {peer["name"]} at {peer["host"]}:{peer["port"]}")
+                    print(f"Discovered peer {peer['name']} at {peer['host']}:{peer['port']}")
                     new_peer_found = True
                     self.known_peers[normalized_endpoint]=(peer["name"], peer["public_key"], peer["node_id"])
                     self.name_to_public_key_dict[peer["name"].lower()]=peer["public_key"]
@@ -638,7 +638,7 @@ class Peer:
             transaction.sign=sign_bytes
             
             print("\nValid Transaction")
-            print(f"\n{msg["type"]}: {msg["transaction"]}")
+            print(f"\n{msg['type']}: {msg['transaction']}")
             print("\n")
 
             async with self.mem_pool_condition:

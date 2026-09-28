@@ -356,7 +356,7 @@ class Peer:
                 if self.activate_disk_save == "y":
                     self.save_known_peers_to_disk()
                 self.name_to_public_key_dict[data["name"].lower()]=data["public_key"]
-                print(f"Registered peer {data["name"]} {data["host"]}:{data["port"]}")
+                print(f"Registered peer {data['name']} {data['host']}:{data['port']}")
                 await self.send_known_peers(websocket)
                 pkt={
                     "type":"new_peer",
@@ -380,7 +380,7 @@ class Peer:
                 if self.activate_disk_save == "y":
                     self.save_known_peers_to_disk()
                 self.name_to_public_key_dict[data["name"].lower()]=data["public_key"]
-                print(f"Registered peer {data["name"]} {data["host"]}:{data["port"]}")
+                print(f"Registered peer {data['name']} {data['host']}:{data['port']}")
                 await self.broadcast_message(msg)
 
         elif t=="change_name":
@@ -395,7 +395,7 @@ class Peer:
                 normalized_self=normalize_endpoint((self.host, self.port))
                 normalized_endpoint = normalize_endpoint((peer["host"], peer["port"]))
                 if normalized_endpoint not in self.known_peers and normalized_endpoint!=normalized_self:
-                    print(f"Discovered peer {peer["name"]} at {peer["host"]}:{peer["port"]}")
+                    print(f"Discovered peer {peer['name']} at {peer['host']}:{peer['port']}")
                     new_peer_found = True
                     self.known_peers[normalized_endpoint]=(peer["name"], peer["public_key"])
                     self.name_to_public_key_dict[peer["name"].lower()]=peer["public_key"]
@@ -458,7 +458,7 @@ class Peer:
             transaction.sign=sign_bytes
 
             print("\nValid Transaction")
-            print(f"\n{msg["type"]}: {msg["transaction"]}")
+            print(f"\n{msg['type']}: {msg['transaction']}")
             print("\n")
 
             async with self.mem_pool_condition:
