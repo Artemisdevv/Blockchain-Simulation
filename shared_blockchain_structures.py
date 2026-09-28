@@ -91,11 +91,8 @@ class CommonChain:
             self.chain = block_list.copy()
 
         else:
-            raise ValueError("Invalid initialization")    @property
-    def lastBlock(self):
-        return self.chain[-1]
+            raise ValueError("Invalid initialization")
 
-    
     @property
     def lastBlock(self):
         return self.chain[-1]
