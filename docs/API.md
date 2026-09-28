@@ -1,35 +1,44 @@
 # Web API Contract
 
 The web interface talks to a per-node API server that wraps a running `Peer`
-instance. This is a design doc for the API shape — implementation is a
-separate task (see issue referenced in the PR that adds this file).
+instance. **Implemented** in `webapi/server.py` (REST only — `/events`
+websocket below is still just a design sketch, not built yet).
 
-Run one API server alongside each `Peer` (same asyncio event loop, so it can
-read `Peer` / `Chain.instance` state directly without cross-thread locking).
-Suggested port convention: `peer_port + 1000` (e.g. peer on 5000 -> API on 6000).
+A Flask app runs in a background thread; anything that mutates Peer state or
+broadcasts a message is bridged onto the Peer's asyncio event loop via
+`asyncio.run_coroutine_threadsafe`. Plain reads touch already-existing
+Python objects directly.
+
+Enabled automatically for PoS peers (`start_peer.py`) on `peer_port + 1000`
+(e.g. peer on 5000 -> API on 6000).
 
 ## REST Endpoints
 
 ### `GET /chain`
-Full block list for the chain explorer.
+Full block list for the chain explorer. Verified shape (actual output of
+`Chain.to_block_dict_list()` — note there's no `hash`/`is_valid`/
+`slash_creator` field on the wire; `hash` is computed client-side if needed
+by hashing the same dict minus `stakers`/`sign`, see `Block.hash` in
+`consensus/pos/blockchain_structures.py`).
 ```json
 {
   "blocks": [
     {
       "id": "uuid",
-      "prevHash": "hex",
-      "hash": "hex",
+      "prevHash": "hex-or-null",
       "ts": 1234567890123,
       "creator": "pem-string",
       "staked_amt": 10,
+      "files": {},
       "transactions": [
-        {"id": "uuid", "payload": 5, "sender": "pem", "receiver": "pem", "ts": 1234.5}
+        {"id": "uuid", "payload": 5, "sender": "pem", "receiver": "pem", "ts": 1234.5, "sign": "base64"}
       ],
       "stakers": [
-        {"id": "uuid", "staker": "pem", "amt": 10, "ts": 1234.5}
+        {"id": "uuid", "staker": "pem", "amt": 10, "ts": 1234.5, "sign": "base64"}
       ],
-      "is_valid": true,
-      "slash_creator": false
+      "vrf_proof_b64": "base64",
+      "seed": "hex",
+      "sign": "base64"
     }
   ]
 }
@@ -77,14 +86,17 @@ Stake an amount for the current epoch (only valid on staker nodes).
 ```json
 // request
 { "amount": 10 }
-// response
-{ "ok": true }
+// response (success)
+{ "ok": true, "creating_block_in_seconds": 34 }
+// response (rejected, e.g. already staked / insufficient balance / not a staker)
+{ "ok": false, "error": "..." }
 ```
 
-## WebSocket: `/events`
+## WebSocket: `/events` — NOT YET IMPLEMENTED
 
-Server pushes JSON messages as node/chain state changes, for live dashboard
-updates without polling.
+Design sketch only. For now, poll `/chain`, `/peers`, `/mempool`, `/stakers`
+on an interval (e.g. every 2-3s) for live-ish updates. Server pushes below
+are the intended shape once someone builds this.
 
 ```json
 { "type": "block_appended", "block": { /* same shape as /chain block */ } }

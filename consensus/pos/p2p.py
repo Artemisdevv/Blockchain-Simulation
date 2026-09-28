@@ -1029,14 +1029,15 @@ class Peer:
         
         self.seen_message_ids.add(pkt["id"])
         if Chain.instance.transaction_exists_in_chain(transaction):
-            return
-        
+            return None
+
         async with self.mem_pool_lock:
                 self.mem_pool.append(transaction)
 
         print("Transaction Created", transaction)
         print("\n")
         await self.broadcast_message(pkt)
+        return transaction
 
     def get_contract_state(self, contract_id):
         for block in reversed(Chain.instance.chain):
@@ -1210,48 +1211,15 @@ class Peer:
                 if(not self.staker):
                     continue
 
-                currTime=datetime.now()
-                time_since=currTime-self.last_epoch_end_ts
-                if(self.staked_amt>0):
-                    print("Can't sent multiple stakes in one epoch")
-                    continue
-
-                if(time_since>timedelta(seconds=EPOCH_TIME*5/6)):
-                    if(time_since>timedelta(seconds=EPOCH_TIME*7/6)):
-                        self.last_epoch_end_ts=datetime.now()
-                        self.staked_amt=0
-                        self.current_stakers.clear()
-                        self.current_stakes.clear()
-                        time_since = timedelta(seconds=0)
-
-                    else:
-                        print(F"\nStake registration period closed, try again in the next epoch, time till next epoch : {EPOCH_TIME-time_since.seconds}\n")
-                        continue
-
                 amt= await asyncio._get_running_loop().run_in_executor(
                     None, input, "\nEnter Amount to stake: "
                 )
-                
-                try:
-                    amt=int(amt)
-                    if(amt>Chain.instance.calc_balance(self.wallet.public_key_pem, self.mem_pool, list(self.current_stakes))):
-                        print("\nInsufficient bank balance\n")
-                        continue
 
-                    if(amt<=0):
-                        print("\nInvalid amount\n")
-                        continue
-
-                    await self.send_stake_announcements(amt)
-                    self.staked_amt=amt
-                    time_left=EPOCH_TIME-time_since.seconds
-                    print(f"Creating block in {time_left} seconds")
-                    asyncio.create_task(self.create_blocks(time_left))
-
-                except ValueError as e:
-                    print("\nPlease enter a valid number!!!\n", e)
-                except Exception as e:
-                    print("\nUnexpected error occured!!!\n", e)
+                result = await self.stake_coin(amt)
+                if result["ok"]:
+                    print(f"Creating block in {result['creating_block_in_seconds']} seconds")
+                else:
+                    print(f"\n{result['error']}\n")
 
             elif ch==0:
                 print("Quitting...")
@@ -1446,6 +1414,49 @@ class Peer:
         self.staked_amt=amt
         print("Stake Created")
         await self.broadcast_message(pkt)
+
+    async def stake_coin(self, amt: int):
+        """
+            Shared staking logic used by both the CLI menu (option 9) and the
+            web API - keeps epoch-timing/balance rules in one place instead
+            of duplicated, so a fix only has to happen once.
+            Returns {"ok": True} or {"ok": False, "error": "..."}.
+        """
+        if not self.staker:
+            return {"ok": False, "error": "node is not a staker"}
+
+        currTime=datetime.now()
+        time_since=currTime-self.last_epoch_end_ts
+        if(self.staked_amt>0):
+            return {"ok": False, "error": "already staked this epoch"}
+
+        if(time_since>timedelta(seconds=EPOCH_TIME*5/6)):
+            if(time_since>timedelta(seconds=EPOCH_TIME*7/6)):
+                self.last_epoch_end_ts=datetime.now()
+                self.staked_amt=0
+                self.current_stakers.clear()
+                self.current_stakes.clear()
+                time_since = timedelta(seconds=0)
+            else:
+                return {"ok": False, "error": f"stake registration period closed, time till next epoch: {EPOCH_TIME-time_since.seconds}"}
+
+        try:
+            amt=int(amt)
+        except (TypeError, ValueError):
+            return {"ok": False, "error": "amount must be a valid integer"}
+
+        if(amt>Chain.instance.calc_balance(self.wallet.public_key_pem, self.mem_pool, list(self.current_stakes))):
+            return {"ok": False, "error": "insufficient balance"}
+
+        if(amt<=0):
+            return {"ok": False, "error": "amount must be positive"}
+
+        await self.send_stake_announcements(amt)
+        self.staked_amt=amt
+        time_left=EPOCH_TIME-time_since.seconds
+        print(f"Creating block in {time_left} seconds")
+        asyncio.create_task(self.create_blocks(time_left))
+        return {"ok": True, "creating_block_in_seconds": time_left}
 
     async def restart_epoch(self):
         while True:
