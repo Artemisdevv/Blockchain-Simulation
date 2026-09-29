@@ -28,18 +28,27 @@ import { BlockDialog, TransactionDialog } from "./DetailDialog";
 import { CopyValue, formatTime, shortKey } from "./utils";
 import {
   connectEventsWs,
+  fetchAttackLabState,
   fetchBalance,
   fetchChain,
   fetchInvariants,
   fetchMempool,
   fetchPeers,
   fetchStakers,
+  healPeerPartition,
+  listManagedPeers,
   requestFaucet,
+  setPeerCensorship,
+  setPeerLatency,
+  setPeerPartition,
+  stopRoomPeer,
   submitStake,
   submitTransaction,
   triggerAttack,
   type Connection,
   type InvariantsResponse,
+  type AttackLabState,
+  type ManagedPeerSummary,
 } from "@/lib/api-client";
 import type {
   Block,
@@ -391,6 +400,8 @@ export function Dashboard({
             {view === "attack_lab" && (
               <AttackLab
                 connection={connection}
+                peers={peers}
+                selfPublicKey={balance.public_key}
                 slashed={slashed}
                 getName={getName}
                 onToast={setToast}
@@ -1248,18 +1259,36 @@ function Mempool({
 
 function AttackLab({
   connection,
+  peers,
+  selfPublicKey,
   slashed,
   getName,
   onToast,
   onRefresh,
 }: {
   connection: Connection;
+  peers: PeersResponse;
+  selfPublicKey: string;
   slashed: NodeSlashedEvent | null;
   getName: (pk: string) => string;
   onToast: (s: string) => void;
   onRefresh: () => void;
 }) {
   const [loading, setLoading] = useState(false);
+  const [managedPeers, setManagedPeers] = useState<ManagedPeerSummary[]>([]);
+  const [selectedManagedPeer, setSelectedManagedPeer] = useState("");
+  const [selectedPeerKeys, setSelectedPeerKeys] = useState<string[]>([]);
+  const [latencyInput, setLatencyInput] = useState("1500");
+  const [censorReceiver, setCensorReceiver] = useState("");
+  const [attackState, setAttackState] = useState<AttackLabState>({ blocked_peers: [], latency_ms: 0, censored_receivers: [] });
+
+  useEffect(() => {
+    fetchAttackLabState(connection).then(setAttackState).catch(() => {});
+    listManagedPeers().then((items) => {
+      setManagedPeers(items);
+      if (items.length) setSelectedManagedPeer(items[0].peer_id);
+    }).catch(() => setManagedPeers([]));
+  }, [connection]);
 
   const handleTriggerAttack = async () => {
     setLoading(true);
@@ -1277,6 +1306,23 @@ function AttackLab({
       setLoading(false);
     }
   };
+
+  const applyAction = async (action: () => Promise<unknown>, success: string) => {
+    setLoading(true);
+    try {
+      await action();
+      onToast(success);
+      setAttackState(await fetchAttackLabState(connection));
+      onRefresh();
+    } catch (err: any) {
+      onToast(err.message || "Attack control failed.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const selectedCensorKey = peers.peers.find((peer) => peer.name === censorReceiver)?.public_key || "";
+  const censorshipEnabled = Boolean(selectedCensorKey && attackState.censored_receivers.includes(selectedCensorKey));
 
   return (
     <div className="space-y-6">
@@ -1305,6 +1351,75 @@ function AttackLab({
       </div>
 
       <div className="grid gap-6 sm:grid-cols-2">
+        <div className="panel p-5 space-y-3">
+          <h2 className="text-sm font-semibold">Kill a Managed Node</h2>
+          <p className="text-xs text-muted-foreground">Stops a peer-manager subprocess. Fixed Compose peers cannot be stopped here.</p>
+          <select className="w-full rounded-md border border-border bg-background p-2 text-sm" value={selectedManagedPeer} onChange={(e) => setSelectedManagedPeer(e.target.value)}>
+            {managedPeers.length === 0 && <option value="">No managed peers running</option>}
+            {managedPeers.map((item) => <option key={item.peer_id} value={item.peer_id}>{item.name} · {item.room_id}</option>)}
+          </select>
+          <Button variant="destructive" disabled={loading || !selectedManagedPeer} onClick={async () => {
+            const stoppedId = selectedManagedPeer;
+            const stoppedName = managedPeers.find((item) => item.peer_id === stoppedId)?.name || "Managed node";
+            setLoading(true);
+            try {
+              await stopRoomPeer(stoppedId);
+              setManagedPeers((items) => items.filter((item) => item.peer_id !== stoppedId));
+              setSelectedManagedPeer("");
+              onToast(`${stoppedName} stopped; signalling and peer connections will update.`);
+              onRefresh();
+            } catch (err: any) {
+              onToast(err.message || "Failed to stop managed node.");
+            } finally {
+              setLoading(false);
+            }
+          }}>Stop selected managed node</Button>
+          <div className="text-xs text-muted-foreground">Managed nodes available: {managedPeers.length}</div>
+        </div>
+
+        <div className="panel p-5 space-y-3">
+          <h2 className="text-sm font-semibold">Partition the P2P Network</h2>
+          <p className="text-xs text-muted-foreground">Isolate selected peer identities from this node’s actual P2P links.</p>
+          <div className="max-h-28 space-y-1 overflow-auto">
+            {peers.peers.filter((peer) => peer.public_key !== selfPublicKey).map((peer) => (
+              <label key={peer.public_key} className="flex items-center gap-2 text-xs">
+                <input type="checkbox" checked={selectedPeerKeys.includes(peer.public_key)} onChange={(e) => setSelectedPeerKeys((keys) => e.target.checked ? [...keys, peer.public_key] : keys.filter((key) => key !== peer.public_key))} />
+                {peer.name}
+              </label>
+            ))}
+          </div>
+          <div className="flex gap-2">
+            <Button disabled={loading || selectedPeerKeys.length === 0} onClick={() => applyAction(() => setPeerPartition(connection, selectedPeerKeys), "Partition applied to selected P2P peers.")}>Partition links</Button>
+            <Button variant="outline" disabled={loading || attackState.blocked_peers.length === 0} onClick={() => applyAction(() => healPeerPartition(connection), "Partition healed; peer reconnection started.")}>Heal network</Button>
+          </div>
+          <div className="text-xs text-muted-foreground">Currently isolated identities: {attackState.blocked_peers.length}</div>
+        </div>
+
+        <div className="panel p-5 space-y-3">
+          <h2 className="text-sm font-semibold">Add P2P Latency</h2>
+          <p className="text-xs text-muted-foreground">Delays every outbound P2P broadcast from this node.</p>
+          <div className="flex items-center gap-2"><Input type="number" min="0" max="10000" value={latencyInput} onChange={(e) => setLatencyInput(e.target.value)} /><span className="text-xs text-muted-foreground">ms</span></div>
+          <div className="flex gap-2">
+            <Button disabled={loading} onClick={() => applyAction(() => setPeerLatency(connection, Number(latencyInput)), `P2P broadcast delay set to ${latencyInput} ms.`)}>Apply delay</Button>
+            <Button variant="outline" disabled={loading} onClick={() => { setLatencyInput("0"); void applyAction(() => setPeerLatency(connection, 0), "P2P latency cleared."); }}>Clear</Button>
+          </div>
+          <div className="text-xs text-muted-foreground">Active outbound delay: {attackState.latency_ms} ms</div>
+        </div>
+
+        <div className="panel p-5 space-y-3">
+          <h2 className="text-sm font-semibold">Censor Transactions</h2>
+          <p className="text-xs text-muted-foreground">This node rejects matching transactions from its mempool and P2P intake.</p>
+          <select className="w-full rounded-md border border-border bg-background p-2 text-sm" value={censorReceiver} onChange={(e) => setCensorReceiver(e.target.value)}>
+            <option value="">Select a transaction recipient</option>
+            {peers.peers.filter((peer) => peer.public_key !== selfPublicKey).map((peer) => <option key={peer.public_key} value={peer.name}>{peer.name}</option>)}
+          </select>
+          <Button disabled={loading || !censorReceiver} onClick={() => applyAction(() => setPeerCensorship(connection, censorReceiver, !censorshipEnabled), censorshipEnabled ? `Censorship for ${censorReceiver} disabled.` : `Transactions to ${censorReceiver} are now censored by this node.`)}>
+            {censorshipEnabled ? "Stop censorship" : "Start censorship"}
+          </Button>
+          <div className="text-xs text-muted-foreground">Active recipient rules: {attackState.censored_receivers.length}</div>
+          {attackState.censored_receivers.length > 0 && <div className="text-xs text-destructive">Censoring: {attackState.censored_receivers.map(getName).join(", ")}</div>}
+        </div>
+
         <div className="panel p-5 space-y-3">
           <div className="flex items-center gap-2 text-sm font-semibold">
             <ShieldCheck className="h-4 w-4 text-success" />

@@ -78,6 +78,10 @@ class Peer:
 
         self.server_connections :Set[websockets.WebSocketServerProtocol]=set() # For inbound peers ie websockets that connect to us and treat us as the server
         self.client_connections :Set[websockets.WebSocketServerProtocol]=set() # For outbound peers ie websockets we initiated, we are the clients
+        self.attack_blocked_peer_keys: Set[str] = set()
+        self.connection_peer_keys: Dict[websockets.WebSocketServerProtocol, str] = {}
+        self.network_latency_ms = 0
+        self.censored_receivers: Set[str] = set()
 
         self.outbound_peers: Set[tuple]=set()
         # The peers to which we currently maintain a outbound connection
@@ -370,6 +374,9 @@ class Peer:
 
         if not t or not id:
             return
+        sender_key = getattr(self, "connection_peer_keys", {}).get(websocket)
+        if sender_key in getattr(self, "attack_blocked_peer_keys", set()) and t not in ("peer_info", "add_peer", "new_peer"):
+            return
         if id in self.seen_message_ids:
             return
         
@@ -397,6 +404,10 @@ class Peer:
             
             if not all(k in data for k in ['host', 'port', 'name', 'public_key']):
                 return
+            self.connection_peer_keys[websocket] = data['public_key']
+            if data['public_key'] in self.attack_blocked_peer_keys:
+                await websocket.close(code=4003, reason="peer isolated by Attack Lab")
+                return
             
             normalized_self = normalize_endpoint((self.host, self.port))
             normalized_endpoint = normalize_endpoint((data['host'], data['port']))
@@ -415,6 +426,10 @@ class Peer:
                 return
             
             if not all(k in data for k in ['host', 'port', 'name', 'public_key']):
+                return
+            self.connection_peer_keys[websocket] = data['public_key']
+            if data['public_key'] in self.attack_blocked_peer_keys:
+                await websocket.close(code=4003, reason="peer isolated by Attack Lab")
                 return
             
             normalized_self = normalize_endpoint((self.host, self.port))
@@ -531,6 +546,8 @@ class Peer:
                 return
 
             if not all(k in tx for k in ['payload', 'sender', 'receiver', 'id', 'ts']):
+                return
+            if tx['receiver'] in getattr(self, "censored_receivers", set()):
                 return
 
             amount = 0
@@ -1027,14 +1044,21 @@ class Peer:
 
         finally:
             self.server_connections.discard(websocket)
+            self.connection_peer_keys.pop(websocket, None)
             await websocket.close()
             await websocket.wait_closed()
 
     async def broadcast_message(self, pkt):
         # For broadcasting messages to all the connections we have
 
+        latency_ms = getattr(self, "network_latency_ms", 0)
+        if latency_ms > 0:
+            await asyncio.sleep(latency_ms / 1000)
+
         targets=self.server_connections | self.client_connections
         for ws in targets:
+            if getattr(self, "connection_peer_keys", {}).get(ws) in getattr(self, "attack_blocked_peer_keys", set()):
+                continue
             try:
                 await ws.send(json.dumps(pkt))
 
@@ -1070,10 +1094,40 @@ class Peer:
                 dead.add(ws)
         self.event_subscribers -= dead
 
+    async def set_attack_partition(self, peer_keys):
+        self.attack_blocked_peer_keys.update(peer_keys)
+        sockets = [ws for ws, key in self.connection_peer_keys.items() if key in self.attack_blocked_peer_keys]
+        for ws in sockets:
+            await ws.close(code=4003, reason="peer isolated by Attack Lab")
+        await self.emit_event({"type": "attack_state", "attack": "partition", "blocked_peers": len(self.attack_blocked_peer_keys)})
+
+    async def heal_attack_partition(self):
+        restored = set(self.attack_blocked_peer_keys)
+        self.attack_blocked_peer_keys.clear()
+        for endpoint, (_, public_key) in list(self.known_peers.items()):
+            if public_key in restored and endpoint not in self.outbound_peers:
+                asyncio.create_task(self.connect_to_peer(*endpoint))
+        await self.emit_event({"type": "attack_state", "attack": "partition", "blocked_peers": 0})
+
+    async def set_network_latency(self, latency_ms):
+        self.network_latency_ms = latency_ms
+        await self.emit_event({"type": "attack_state", "attack": "latency", "latency_ms": latency_ms})
+
+    async def set_transaction_censorship(self, receiver_key, enabled):
+        if enabled:
+            self.censored_receivers.add(receiver_key)
+            async with self.mem_pool_lock:
+                self.mem_pool = [tx for tx in self.mem_pool if tx.receiver != receiver_key]
+        else:
+            self.censored_receivers.discard(receiver_key)
+        await self.emit_event({"type": "attack_state", "attack": "censorship", "receiver": receiver_key, "enabled": enabled})
+
     async def create_and_broadcast_tx(self, receiver_public_key, payload):
         """
             Function to create and broadcast transactions
         """
+        if receiver_public_key in self.censored_receivers:
+            raise ValueError("Transaction receiver is currently censored by this peer")
         transaction=Transaction(payload, self.wallet.public_key_pem, receiver_public_key)
         transaction_str=str(transaction)
         
@@ -1395,6 +1449,7 @@ class Peer:
             print(f"Failed to connect to {host}:{port} ::: {e}")
         finally:
             self.client_connections.discard(websocket)
+            self.connection_peer_keys.pop(websocket, None)
             self.outbound_peers.discard(endpoint)
             self.got_pong.pop(websocket, None)
             self.have_sent_peer_info.pop(websocket, None)

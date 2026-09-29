@@ -140,6 +140,7 @@ class PeerManager:
                 peer.process.wait(timeout=5)
             except subprocess.TimeoutExpired:
                 peer.process.kill()
+        return peer is not None
 
     def stop_all(self):
         with self._lock:
@@ -167,6 +168,22 @@ def create_app(manager=None):
             "room_id": peer.room_id,
             "token": peer.token,
         }), 201
+
+    @app.get("/peers")
+    def list_peers():
+        with manager._lock:
+            manager._reap_exited()
+            peers = [
+                {"peer_id": peer.peer_id, "name": peer.name, "room_id": peer.room_id}
+                for peer in manager.peers.values()
+            ]
+        return jsonify({"peers": peers})
+
+    @app.delete("/peers/<peer_id>")
+    def delete_peer(peer_id):
+        if not manager.stop_peer(peer_id):
+            return jsonify({"ok": False, "error": "Managed peer not found"}), 404
+        return jsonify({"ok": True})
 
     @app.route("/api/runtime/<peer_id>", defaults={"path": ""}, methods=["GET", "POST", "OPTIONS"])
     @app.route("/api/runtime/<peer_id>/<path:path>", methods=["GET", "POST", "OPTIONS"])

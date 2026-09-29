@@ -46,6 +46,28 @@ export async function startRoomPeer(config: RoomPeerRequest): Promise<RoomPeerRe
   return response.json() as Promise<RoomPeerResponse>;
 }
 
+export async function stopRoomPeer(peerId: string): Promise<void> {
+  const response = await fetch(`/api/peer-setup/peers/${encodeURIComponent(peerId)}`, {
+    method: "DELETE",
+  });
+  if (!response.ok) {
+    throw new Error(`Failed to stop managed peer (HTTP ${response.status}).`);
+  }
+}
+
+export interface ManagedPeerSummary {
+  peer_id: string;
+  name: string;
+  room_id: string;
+}
+
+export async function listManagedPeers(): Promise<ManagedPeerSummary[]> {
+  const response = await fetch("/api/peer-setup/peers");
+  if (!response.ok) throw new Error(`Failed to load managed peers (HTTP ${response.status}).`);
+  const data = (await response.json()) as { peers: ManagedPeerSummary[] };
+  return data.peers;
+}
+
 export async function apiRequest<T>(
   connection: Connection,
   path: string,
@@ -137,6 +159,38 @@ export async function triggerAttack(
   return apiRequest<TriggerAttackResponse>(connection, "/malicious/trigger", {
     method: "POST",
     body: JSON.stringify({ attack_type: attackType }),
+  });
+}
+
+export interface AttackLabState {
+  blocked_peers: string[];
+  latency_ms: number;
+  censored_receivers: string[];
+}
+
+export async function fetchAttackLabState(connection: Connection): Promise<AttackLabState> {
+  return apiRequest<AttackLabState>(connection, "/attack-lab/state");
+}
+
+export async function setPeerPartition(connection: Connection, peerKeys: string[]) {
+  return apiRequest<{ ok: boolean }>(connection, "/attack-lab/partition", {
+    method: "POST", body: JSON.stringify({ peer_keys: peerKeys }),
+  });
+}
+
+export async function healPeerPartition(connection: Connection) {
+  return apiRequest<{ ok: boolean }>(connection, "/attack-lab/heal-partition", { method: "POST", body: "{}" });
+}
+
+export async function setPeerLatency(connection: Connection, latencyMs: number) {
+  return apiRequest<{ ok: boolean; latency_ms: number }>(connection, "/attack-lab/latency", {
+    method: "POST", body: JSON.stringify({ latency_ms: latencyMs }),
+  });
+}
+
+export async function setPeerCensorship(connection: Connection, receiver: string, enabled: boolean) {
+  return apiRequest<{ ok: boolean }>(connection, "/attack-lab/censorship", {
+    method: "POST", body: JSON.stringify({ receiver, enabled }),
   });
 }
 
