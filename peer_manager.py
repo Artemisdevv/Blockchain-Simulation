@@ -23,9 +23,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlparse
 
+from reportlab.lib import colors
+from reportlab.lib.enums import TA_LEFT
 from reportlab.lib.pagesizes import letter
-from reportlab.lib.styles import getSampleStyleSheet
-from reportlab.platypus import KeepTogether, SimpleDocTemplate, Paragraph, Spacer
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, LongTable, TableStyle
 
 import requests
 from flask import Flask, Response, jsonify, request
@@ -601,35 +603,306 @@ def create_app(manager=None):
 
 def build_report_pdf(report, output):
     from xml.sax.saxutils import escape
-    styles = getSampleStyleSheet()
-    doc = SimpleDocTemplate(output, pagesize=letter, title=f"Simulation Run {report['run']['run_id']}", rightMargin=42, leftMargin=42, topMargin=42, bottomMargin=42)
-    story = [Paragraph("Blockchain Simulation Run Report", styles["Title"]), Spacer(1, 12)]
-    run = report["run"]
-    def section(title, lines):
-        heading = Paragraph(title, styles["Heading2"])
-        paragraphs = [Paragraph(escape(str(line)), styles["BodyText"]) for line in lines]
-        story.append(KeepTogether([heading, *paragraphs[:3]]))
-        story.extend(paragraphs[3:])
-        story.append(Spacer(1, 8))
-    section("Run Summary", [f"Room: {run['room_id']}", f"Run ID: {run['run_id']}", f"Started (UTC): {time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime(run['started_at']))}", f"Ended (UTC): {time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime(run['ended_at'])) if run.get('ended_at') else 'Still active at export'}", f"Duration: {run['duration_seconds']} seconds"])
-    observed_peers = (report.get("final_state", {}).get("peers") or {}).get("peers", [])
-    section("Network", [f"Final peer snapshot source: {report.get('final_state', {}).get('source_peer', 'Unavailable')}", f"Observed peers: {len(observed_peers)}", "Peer names: " + (", ".join(p.get("name", "unknown") for p in observed_peers) or "Unavailable")])
-    fmt_time = lambda value: time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime(value)) if isinstance(value, (int, float)) else "Unavailable"
-    section("Participants", [f"{p.get('name') or 'Unknown'} | first seen {fmt_time(p.get('first_seen_at'))} | last seen {fmt_time(p.get('last_seen_at'))} | {p.get('status', 'observed')}" for p in report.get("participants", [])] or ["No participants recorded."])
-    chain = report.get("final_state", {}).get("chain", {}).get("blocks", [])
-    txs = [(block, tx) for block in chain for tx in block.get("transactions", [])]
-    run_blocks = [e.get("data", {}).get("block", {}) for e in report.get("events", []) if e.get("type") == "block_appended"]
-    section("Blockchain", [f"Blocks observed during run: {len(run_blocks)} (event history coverage may be partial)", f"Final chain snapshot height: {len(chain)}", f"Final chain tip: {chain[-1].get('id') if chain else 'Unavailable'}", f"Confirmed transactions in final chain snapshot: {len(txs)}"] + [f"Block {i}: {b.get('id')} | creator {b.get('creator')} | timestamp {b.get('ts')} | stake {b.get('staked_amt', 0)} | tx {len(b.get('transactions', []))}" for i, b in enumerate(run_blocks)] + [f"Transaction {tx.get('id')}: {tx.get('sender')} -> {tx.get('receiver')} | payload {json.dumps(tx.get('payload'), default=str)} | block {block.get('id')}" for block, tx in txs])
-    stakes = report.get("final_state", {}).get("stakers", {}).get("stakers", {})
-    stake_events = [e for e in report.get("events", []) if e.get("type") == "stake_registered"]
-    section("Validators / Stake", [f"Stake change observed: {e.get('data', {}).get('amount')} for {e.get('data', {}).get('staker')}" for e in stake_events] + [f"Current {key}: {value}" for key, value in stakes.items()] or ["No active stake snapshot available."])
-    attacks = [e for e in report.get("events", []) if "attack" in e["type"] or e["type"] == "node_slashed"]
-    section("Attacks", [json.dumps(e.get("data", {}), default=str) for e in attacks] or ["No attack events were observed by the gateway."])
-    section("Events", [f"#{e['sequence']} | {time.strftime('%H:%M:%S', time.gmtime(e['timestamp']))} | {e['type']} | {e.get('source_peer') or 'unknown'}" for e in report.get("events", [])] or ["No live events recorded."])
+
+    run = report.get("run", {})
     final_state = report.get("final_state", {})
+    events = sorted(report.get("events", []), key=lambda item: (item.get("timestamp", 0), item.get("sequence", 0)))
+    chain = (final_state.get("chain") or {}).get("blocks", [])
+    valid_chain = [block for block in chain if block.get("is_valid", True)]
     final_mempool = (final_state.get("mempool") or {}).get("transactions", [])
-    section("Final State", [f"Snapshot at: {fmt_time(final_state.get('captured_at'))}", f"Final peer names: {', '.join(p.get('name', 'unknown') for p in observed_peers) or 'Unavailable'}", f"Pending transactions at snapshot: {len(final_mempool)}", f"Completeness: {json.dumps(final_state.get('completeness', {}))}", f"Metrics: {json.dumps(final_state.get('metrics', {}), default=str)}", f"Invariants: {json.dumps(final_state.get('invariants', {}), default=str)}", f"Attack Lab state: {json.dumps(final_state.get('attack_lab_state', {}), default=str)}", "Mempool, active peers, and attack state are observed snapshots, not complete historical records."] + [f"Pending transaction {tx.get('id')}: {tx.get('sender')} -> {tx.get('receiver')} | payload {json.dumps(tx.get('payload'), default=str)}" for tx in final_mempool])
-    doc.build(story)
+    block_events = [event for event in events if event.get("type") == "block_appended"]
+    observed_block_ids = {
+        event.get("data", {}).get("block", {}).get("id")
+        for event in block_events
+        if event.get("data", {}).get("block", {}).get("id")
+    }
+
+    # Count and display a transaction once by its canonical ID. The block/API
+    # entry count remains available in the metrics table with an explicit label.
+    confirmed_by_id = {}
+    missing_id_entries = []
+    for block in valid_chain:
+        for tx in block.get("transactions", []):
+            tx_id = tx.get("id")
+            if tx_id:
+                confirmed_by_id.setdefault(str(tx_id), (block, tx))
+            else:
+                missing_id_entries.append((block, tx))
+
+    def utc_time(value, unknown="Unavailable"):
+        if not isinstance(value, (int, float)):
+            return unknown
+        if value > 100_000_000_000:  # block timestamps are milliseconds
+            value /= 1000
+        return time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime(value))
+
+    def short_id(value, limit=24):
+        value = str(value or "Unavailable").replace("\n", " ").strip()
+        if "BEGIN PUBLIC KEY" in value:
+            return f"key:{hashlib.sha256(value.encode()).hexdigest()[:12]}"
+        if len(value) > limit:
+            return value[:limit - 13] + "..." + value[-10:]
+        return value
+
+    def short_value(value):
+        if isinstance(value, dict):
+            return "; ".join(f"{key}: {short_value(item)}" for key, item in value.items()) or "—"
+        if isinstance(value, (list, tuple, set)):
+            return ", ".join(short_value(item) for item in value) or "—"
+        if value is None or value == "":
+            return "—"
+        if isinstance(value, str) and "BEGIN PUBLIC KEY" in value:
+            return short_id(value)
+        text = str(value)
+        return short_id(text, 46)
+
+    styles = getSampleStyleSheet()
+    navy = colors.HexColor("#17324D")
+    blue = colors.HexColor("#245B83")
+    pale = colors.HexColor("#EAF1F6")
+    rule = colors.HexColor("#D5DEE7")
+    muted = colors.HexColor("#5F6F7D")
+    styles.add(ParagraphStyle(name="ReportTitle", parent=styles["Title"], fontName="Helvetica-Bold", fontSize=23, leading=27, textColor=navy, alignment=TA_LEFT, spaceAfter=4))
+    styles.add(ParagraphStyle(name="ReportSubtitle", parent=styles["BodyText"], fontSize=9, leading=12, textColor=muted, spaceAfter=12))
+    styles.add(ParagraphStyle(name="SectionTitle", parent=styles["Heading2"], fontName="Helvetica-Bold", fontSize=13, leading=16, textColor=navy, spaceBefore=10, spaceAfter=6, keepWithNext=True))
+    styles.add(ParagraphStyle(name="Cell", parent=styles["BodyText"], fontSize=7.5, leading=9, splitLongWords=True, wordWrap="CJK"))
+    styles.add(ParagraphStyle(name="CellSmall", parent=styles["Cell"], fontSize=6.5, leading=8))
+    styles.add(ParagraphStyle(name="CellHeader", parent=styles["Cell"], fontName="Helvetica-Bold", textColor=colors.white, fontSize=7.5, leading=9))
+    styles.add(ParagraphStyle(name="MetricLabel", parent=styles["Cell"], fontName="Helvetica-Bold", textColor=navy, fontSize=8, leading=10))
+    styles.add(ParagraphStyle(name="MetricValue", parent=styles["Cell"], fontName="Helvetica-Bold", textColor=blue, fontSize=13, leading=15, alignment=TA_LEFT))
+
+    doc = SimpleDocTemplate(
+        output,
+        pagesize=letter,
+        title=f"Blockchain Run Report - {run.get('run_id', 'unknown')}",
+        author="Blockchain Simulation",
+        rightMargin=38,
+        leftMargin=38,
+        topMargin=50,
+        bottomMargin=42,
+    )
+
+    def para(value, style="Cell"):
+        return Paragraph(escape(str(value if value is not None else "—")).replace("\n", "<br/>"), styles[style])
+
+    def make_table(rows, widths, header=True, repeat=1, compact=False):
+        table_rows = []
+        for row_index, row in enumerate(rows):
+            style = "CellHeader" if header and row_index == 0 else ("CellSmall" if compact else "Cell")
+            table_rows.append([item if isinstance(item, Paragraph) else para(item, style) for item in row])
+        table_class = LongTable if len(table_rows) > 12 else Table
+        table = table_class(table_rows, colWidths=widths, repeatRows=repeat if header else 0, hAlign="LEFT")
+        commands = [
+            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+            ("LEFTPADDING", (0, 0), (-1, -1), 5),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 5),
+            ("TOPPADDING", (0, 0), (-1, -1), 4),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+            ("GRID", (0, 0), (-1, -1), 0.35, rule),
+        ]
+        if header:
+            commands += [("BACKGROUND", (0, 0), (-1, 0), navy)]
+        start = 1 if header else 0
+        commands += [("ROWBACKGROUNDS", (0, start), (-1, -1), [colors.white, colors.HexColor("#F6F8FA")])]
+        table.setStyle(TableStyle(commands))
+        return table
+
+    def section(title, table_or_flowable):
+        return [Paragraph(escape(title), styles["SectionTitle"]), table_or_flowable, Spacer(1, 6)]
+
+    def page_chrome(canvas, document):
+        canvas.saveState()
+        width, height = letter
+        canvas.setStrokeColor(rule)
+        canvas.setLineWidth(0.5)
+        canvas.line(doc.leftMargin, height - 34, width - doc.rightMargin, height - 34)
+        canvas.setFont("Helvetica", 7.5)
+        canvas.setFillColor(muted)
+        canvas.drawString(doc.leftMargin, height - 27, "BLOCKCHAIN SIMULATION  /  RUN REPORT")
+        canvas.line(doc.leftMargin, 30, width - doc.rightMargin, 30)
+        canvas.drawString(doc.leftMargin, 18, f"Room {short_id(run.get('room_id'), 32)}  |  Run {short_id(run.get('run_id'), 28)}")
+        canvas.drawRightString(width - doc.rightMargin, 18, f"Page {document.page}")
+        canvas.restoreState()
+
+    story = [
+        Paragraph("Blockchain Run Report", styles["ReportTitle"]),
+        Paragraph("Judge-facing summary of the observed simulation run", styles["ReportSubtitle"]),
+    ]
+
+    metadata = [
+        ["Room ID", run.get("room_id", "Unavailable"), "Run ID", run.get("run_id", "Unavailable")],
+        ["Started (UTC)", utc_time(run.get("started_at")), "Ended (UTC)", utc_time(run.get("ended_at"), "Still active at export")],
+        ["Duration", f"{run.get('duration_seconds', 'Unavailable')} seconds", "Snapshot (UTC)", utc_time(final_state.get("captured_at"))],
+    ]
+    meta_rows = [[para(item, "MetricLabel" if index % 2 == 0 else "Cell") for index, item in enumerate(row)] for row in metadata]
+    meta_table = Table(meta_rows, colWidths=[75, 176, 82, 157], hAlign="LEFT")
+    meta_table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (0, -1), pale), ("BACKGROUND", (2, 0), (2, -1), pale),
+        ("GRID", (0, 0), (-1, -1), 0.4, rule), ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 6), ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+        ("TOPPADDING", (0, 0), (-1, -1), 5), ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+    ]))
+    story.extend(section("Run Details", meta_table))
+
+    participants_by_id = {}
+    for index, participant in enumerate(report.get("participants", [])):
+        name = participant.get("name") or "Unknown"
+        identity = participant.get("public_key") or participant.get("peer_id") or f"name:{name}"
+        item = participants_by_id.get(identity)
+        if item is None:
+            item = {**participant, "name": name, "_identity": identity}
+            participants_by_id[identity] = item
+        else:
+            first_values = [value for value in (item.get("first_seen_at"), participant.get("first_seen_at")) if isinstance(value, (int, float))]
+            last_values = [value for value in (item.get("last_seen_at"), participant.get("last_seen_at")) if isinstance(value, (int, float))]
+            if first_values:
+                item["first_seen_at"] = min(first_values)
+            if last_values:
+                item["last_seen_at"] = max(last_values)
+            if participant.get("status") != "not_observed":
+                item["status"] = participant.get("status", "observed")
+    participants = list(participants_by_id.values())
+
+    stakers = (final_state.get("stakers") or {}).get("stakers", {}) or {}
+    active_stakers = {key: value for key, value in stakers.items() if isinstance(value, (int, float)) and value > 0}
+    summary_rows = [
+        ["Result", "Value", "Result", "Value"],
+        ["Final valid blocks", str(len(valid_chain)), "Confirmed transactions", str(len(confirmed_by_id))],
+        ["Pending transactions", str(len(final_mempool)), "block_appended events observed", str(len(block_events))],
+        ["Unique blocks observed", str(len(observed_block_ids)), "Participants", str(len(participants))],
+        ["Active validators", str(len(active_stakers)), "Duration", f"{run.get('duration_seconds', '—')} sec"],
+    ]
+    summary_table = make_table(summary_rows, [160, 52, 160, 84])
+    story.extend(section("Key Results", summary_table))
+    story.append(para("Confirmed transactions are unique IDs in valid blocks. Pending transactions are mempool entries at the final snapshot. block_appended counts event records and may repeat a block ID across peers; unique blocks observed counts distinct IDs in those events.", "CellSmall"))
+    story.append(Spacer(1, 4))
+
+    participant_rows = [["Participant", "Public key / identity", "First observed (UTC)", "Last observed (UTC)", "Status"]]
+    for participant in participants:
+        participant_rows.append([
+            participant.get("name") or "Unknown",
+            short_id(participant.get("public_key") or participant.get("peer_id") or participant.get("_identity")),
+            utc_time(participant.get("first_seen_at")),
+            utc_time(participant.get("last_seen_at")),
+            participant.get("status", "observed").replace("_", " "),
+        ])
+    if not participants:
+        participant_rows.append(["No participants recorded", "—", "—", "—", "—"])
+    story.extend(section("Participants", make_table(participant_rows, [76, 118, 112, 112, 98], compact=True)))
+
+    # Keep observed append events distinct from the final chain snapshot.
+    append_rows = [["Observed (UTC)", "Block time (UTC)", "Source peer", "Block ID", "Creator", "Stake", "Tx entries"]]
+    for event in block_events:
+        block = event.get("data", {}).get("block", {})
+        append_rows.append([
+            utc_time(event.get("timestamp")), utc_time(block.get("ts")),
+            event.get("source_peer") or "Unknown", short_id(block.get("id")), short_id(block.get("creator")),
+            str(block.get("staked_amt", 0)),
+            str(len(block.get("transactions", []))),
+        ])
+    if not block_events:
+        append_rows.append(["No block_appended events recorded", "—", "—", "—", "—", "—", "—"])
+    story.extend(section("Block Append Event History", make_table(append_rows, [83, 83, 57, 91, 98, 48, 56], compact=True)))
+
+    final_block_rows = [["Height", "Block ID", "Creator", "Timestamp (UTC)", "Stake", "Tx entries"]]
+    for height, block in enumerate(valid_chain, start=1):
+        final_block_rows.append([
+            str(height), short_id(block.get("id")), short_id(block.get("creator")),
+            utc_time(block.get("ts")), str(block.get("staked_amt", 0)),
+            str(len(block.get("transactions", []))),
+        ])
+    if not valid_chain:
+        final_block_rows.append(["—", "No valid blocks in snapshot", "—", "—", "—", "—"])
+    story.extend(section("Final Valid Chain Blocks", make_table(final_block_rows, [40, 112, 102, 120, 58, 84], compact=True)))
+
+    tx_rows = [["Transaction ID", "Sender", "Receiver", "Included block", "Payload"]]
+    for tx_id, (block, tx) in confirmed_by_id.items():
+        tx_rows.append([
+            short_id(tx_id), short_id(tx.get("sender")), short_id(tx.get("receiver")),
+            short_id(block.get("id")), short_value(tx.get("payload")),
+        ])
+    for block, tx in missing_id_entries:
+        tx_rows.append(["Missing transaction ID", short_id(tx.get("sender")), short_id(tx.get("receiver")), short_id(block.get("id")), short_value(tx.get("payload"))])
+    if len(tx_rows) == 1:
+        tx_rows.append(["No confirmed transactions in valid blocks", "—", "—", "—", "—"])
+    story.extend(section("Confirmed Transactions", make_table(tx_rows, [91, 108, 78, 103, 136], compact=True)))
+
+    mempool_rows = [["Transaction ID", "Sender", "Receiver", "Payload"]]
+    for tx in final_mempool:
+        mempool_rows.append([short_id(tx.get("id")), short_id(tx.get("sender")), short_id(tx.get("receiver")), short_value(tx.get("payload"))])
+    if not final_mempool:
+        mempool_rows.append(["No pending transactions at snapshot", "—", "—", "—"])
+    story.extend(section("Pending Transactions (Mempool Snapshot)", make_table(mempool_rows, [105, 125, 110, 176], compact=True)))
+
+    stake_rows = [["Validator / staker", "Current stake"]]
+    for identity, amount in active_stakers.items():
+        stake_rows.append([short_id(identity), str(amount)])
+    if not active_stakers:
+        stake_rows.append(["No active validator stakes in snapshot", "—"])
+    story.extend(section("Validators and Current Stakes", make_table(stake_rows, [370, 146])))
+
+    attacks = [event for event in events if "attack" in str(event.get("type", "")) or event.get("type") == "node_slashed"]
+    attack_rows = [["Time (UTC)", "Event", "Source", "Details"]]
+    for event in attacks:
+        payload = event.get("data", {}) or {}
+        detail = {key: value for key, value in payload.items() if key not in ("type", "block")}
+        if payload.get("block"):
+            detail["block_id"] = payload["block"].get("id") if isinstance(payload["block"], dict) else payload["block"]
+        attack_rows.append([utc_time(event.get("timestamp")), event.get("type", "unknown"), event.get("source_peer") or "Unknown", short_value(detail)])
+    if not attacks:
+        attack_rows.append(["No attack events observed", "—", "—", "—"])
+    story.extend(section("Attack Lab Activity", make_table(attack_rows, [102, 95, 75, 244], compact=True)))
+
+    state_rows = [["Area", "Snapshot value / status"]]
+    state_rows.append(["Snapshot source", final_state.get("source_peer", "Unavailable")])
+    state_rows.append(["Snapshot time (UTC)", utc_time(final_state.get("captured_at"))])
+    state_rows.append(["Reachable peers", ", ".join(peer.get("name", "Unknown") for peer in ((final_state.get("peers") or {}).get("peers", []))) or "Unavailable"])
+    metrics = final_state.get("metrics", {}) or {}
+    metric_labels = {
+        "total_transactions": "Peer API transaction entries (may include repeated IDs)",
+        "blocks_count": "Peer API chain block entries",
+        "mempool_count": "Peer API mempool entries",
+        "peer_count": "Peer API reachable peer count",
+        "total_staked": "Peer API total stake",
+        "avg_block_time_sec": "Peer API average block time (sec)",
+        "room_id": "Peer API room ID",
+    }
+    for key, value in metrics.items():
+        state_rows.append([metric_labels.get(key, key.replace("_", " ").title()), short_value(value)])
+    invariants = final_state.get("invariants", {}) or {}
+    for key, value in invariants.items():
+        if isinstance(value, bool):
+            value = "PASS" if value else "CHECK"
+        state_rows.append([f"Invariant: {key.replace('_', ' ')}", short_value(value)])
+    attack_state = final_state.get("attack_lab_state", {}) or {}
+    for key, value in attack_state.items():
+        state_rows.append([f"Attack Lab: {key.replace('_', ' ')}", short_value(value)])
+    for key, value in (final_state.get("completeness", {}) or {}).items():
+        state_rows.append([f"Coverage: {key.replace('_', ' ')}", short_value(value)])
+    story.extend(section("Final State and Data Coverage", make_table(state_rows, [168, 348], compact=True)))
+
+    timeline_rows = [["#", "Time (UTC)", "Event", "Source", "Event details"]]
+    for event in events:
+        payload = event.get("data", {}) or {}
+        if event.get("type") == "block_appended":
+            block = payload.get("block", {}) or {}
+            details = f"Block {short_id(block.get('id'))}; {len(block.get('transactions', []))} transaction entries"
+        else:
+            details = short_value({key: value for key, value in payload.items() if key != "type"})
+        timeline_rows.append([
+            str(event.get("sequence", "—")), utc_time(event.get("timestamp")),
+            event.get("type", "unknown").replace("_", " "),
+            event.get("source_peer") or "Unknown", details,
+        ])
+    if not events:
+        timeline_rows.append(["—", "—", "No live events recorded", "—", "—"])
+    story.extend(section("Event Timeline", make_table(timeline_rows, [28, 112, 100, 66, 210], compact=True)))
+
+    if missing_id_entries:
+        story.append(Spacer(1, 4))
+        story.append(para(f"Data note: {len(missing_id_entries)} transaction entries in valid blocks have no ID. They are shown above, but excluded from the confirmed unique-ID total.", "CellSmall"))
+
+    doc.build(story, onFirstPage=page_chrome, onLaterPages=page_chrome)
 
 
 async def run_ws_proxy(manager, websocket):

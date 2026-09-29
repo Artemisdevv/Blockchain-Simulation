@@ -190,7 +190,7 @@ async def run_peer(peer, action, bootstrap_host, bootstrap_port,
         loop = asyncio.get_running_loop()
         _, token, limiter, auth_tracker = run_api_server(peer, loop, api_port)
         events_host = os.environ.get("WEBAPI_HOST", "127.0.0.1")
-        run_events_server(peer, events_host, api_port + 1, token, limiter, auth_tracker)
+        _events_server_task = run_events_server(peer, events_host, api_port + 1, token, limiter, auth_tracker)
 
     if action == "room":
         from signalling.client import join_room
