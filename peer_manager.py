@@ -320,7 +320,7 @@ class PeerManager:
     def find_token_owner(self, token):
         with self._lock:
             for peer in self.peers.values():
-                if peer.token == token and peer.process.poll() is None:
+                if secrets.compare_digest(peer.token, token) and peer.process.poll() is None:
                     return peer.room_id
         for candidate in self.fixed_peers:
             if secrets.compare_digest(str(candidate.get("token", "")), token):
@@ -486,9 +486,15 @@ def create_app(manager=None):
 
     @app.post("/spectator-links")
     def create_spectator_link():
-        data = request.get_json(silent=True) or {}
-        room_id = str(data.get("room_id", "")).strip()
-        if not ROOM_ID_RE.fullmatch(room_id) or not manager.room_peers(room_id):
+        # Only someone who holds a peer token for a room can share it: the room comes
+        # from the token, not from the request body, so you can't mint links for
+        # rooms you are not part of.
+        auth = request.headers.get("Authorization", "")
+        supplied = auth[len("Bearer "):] if auth.startswith("Bearer ") else ""
+        room_id = manager.find_token_owner(supplied) if supplied else None
+        if not room_id:
+            return jsonify({"error": "A peer token for this room is required to create a spectator link."}), 403
+        if not manager.room_peers(room_id):
             return jsonify({"error": "No accessible peers are currently available for this room."}), 404
         return jsonify({"room_id": room_id, "spectator_token": manager.make_spectator_token(room_id)})
 

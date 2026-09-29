@@ -25,8 +25,11 @@ def test_spectator_link_scopes_read_only_room_access(monkeypatch, tmp_path):
     monkeypatch.setattr(module.requests, "get", lambda url, **kwargs: UpstreamResponse({"blocks": []}))
     client = create_app(manager)[0].test_client()
 
-    issued = client.post("/spectator-links", json={"room_id": "demo"})
+    assert client.post("/spectator-links", json={"room_id": "demo"}).status_code == 403
+    assert client.post("/spectator-links", json={"room_id": "demo"}, headers={"Authorization": "Bearer nope"}).status_code == 403
+    issued = client.post("/spectator-links", headers={"Authorization": "Bearer peer-secret"})
     assert issued.status_code == 200
+    assert issued.json["room_id"] == "demo"
     assert manager.issuer_token not in issued.get_data(as_text=True)
     token = issued.json["spectator_token"]
 
@@ -38,8 +41,9 @@ def test_spectator_link_scopes_read_only_room_access(monkeypatch, tmp_path):
     assert attack_mutation.status_code == 403
     malicious_trigger = client.post(f"/spectator/{token}/malicious/trigger", json={}, headers={"Authorization": f"Bearer {token}"})
     assert malicious_trigger.status_code == 403
-    wrong_room = client.post("/spectator-links", json={"room_id": "elsewhere"}, headers={"X-Spectator-Issuer": manager.issuer_token})
-    assert wrong_room.status_code == 404
+    # A body room_id is ignored: the link always targets the caller's own room.
+    other = client.post("/spectator-links", json={"room_id": "elsewhere"}, headers={"Authorization": "Bearer peer-secret"})
+    assert other.json["room_id"] == "demo"
 
 
 def test_spectator_pdf_report_is_generated_from_structured_report(monkeypatch, tmp_path):
