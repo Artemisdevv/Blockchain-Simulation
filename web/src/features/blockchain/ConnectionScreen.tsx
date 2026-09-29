@@ -8,6 +8,7 @@ import { fetchBalance, startRoomPeer, type Connection } from "@/lib/api-client";
 export function ConnectionScreen({ onConnect }: { onConnect: (connection: Connection) => void }) {
   const [name, setName] = useState("");
   const [roomId, setRoomId] = useState("");
+  const [malicious, setMalicious] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -51,6 +52,7 @@ export function ConnectionScreen({ onConnect }: { onConnect: (connection: Connec
       const peer = await startRoomPeer({
         name: name.trim(),
         room_id: roomId.trim(),
+        role: malicious ? "malicious" : "honest",
       });
       const connection: Connection = {
         url: `/api/runtime/${peer.peer_id}`,
@@ -160,6 +162,22 @@ export function ConnectionScreen({ onConnect }: { onConnect: (connection: Connec
                   placeholder="demo"
                 />
               </div>
+
+              <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-border p-3 text-sm">
+                <input
+                  type="checkbox"
+                  className="mt-0.5 h-4 w-4"
+                  checked={malicious}
+                  onChange={(e) => setMalicious(e.target.checked)}
+                />
+                <span>
+                  <span className="font-medium">Join as a malicious node</span>
+                  <span className="block text-xs text-muted-foreground">
+                    Stakes automatically and double-signs conflicting blocks whenever it is elected, so
+                    honest nodes can detect and slash it. For the Attack Lab demo.
+                  </span>
+                </span>
+              </label>
 
               {error && (
                 <p role="alert" className="text-sm font-medium text-destructive">

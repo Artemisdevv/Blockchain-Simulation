@@ -6,7 +6,7 @@ from consensus.poa.p2p import Peer as PoAPeer
 from consensus.pos.p2p import Peer as PoSPeer
 from consensus.pow.p2p import Peer as PoWPeer
 from consensus.poa.mal_node import Peer as PoaMalPeer
-from consensus.pos.mal_node import Peer as PosMalPeer
+from consensus.pos.malicious_peer import MaliciousPeer as PosMalPeer
 from consensus.pow.mal_node import Peer as PowMalPeer
 
 
@@ -145,12 +145,7 @@ def start_peer():
                 activate_disk_save
             )
         else:
-            peer = PosMalPeer(
-                host, port, name,
-                True,
-                activate_disk_load,
-                activate_disk_save
-            )
+            peer = PosMalPeer(host, port, name, activate_disk_load, activate_disk_save)
 
     else:
         mal = get_bool("MALICIOUS", "Malicious? (y/n): ")
@@ -173,7 +168,7 @@ def start_peer():
             )
 
 
-    enable_api = (consensus == "pos" and not mal)
+    enable_api = (consensus == "pos")
     api_port = port + 1000
 
     try:

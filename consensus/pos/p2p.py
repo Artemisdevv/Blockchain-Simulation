@@ -965,14 +965,14 @@ class Peer:
                     block1 = Chain.instance.chain[pos]
                     block2 = block_list[pos]
 
-                    if block1.creator == block2.creator:  # Non malicious fork
+                    if block1.creator != block2.creator:  # Ordinary fork: different leaders
                         l1 = len(Chain.instance.chain)
                         l2 = len(block_list)
                         if l2 > l1:
                             Chain.instance.rewrite(block_list)
                             if self.activate_disk_save == "y":
                                 self.save_chain_to_disk()
-                    else:  # Malicious fork
+                    else:  # Same creator, two different blocks at one height: double-sign
                         await self.verify_and_slash(block1, block2, pos, block_list)
                         
                 elif weight_of_chain(Chain.instance.chain) < weight_of_chain(block_list):
