@@ -5,12 +5,12 @@ import { Dashboard } from "@/features/blockchain/Dashboard";
 import type { Connection } from "@/lib/api-client";
 
 const aliceConnection: Connection = {
-  url: import.meta.env["VITE_ALICE_API_URL"] || "http://localhost:6001",
+  url: import.meta.env["VITE_ALICE_API_URL"] || "/api/alice",
   token: "demo-token-alice",
   wsUrl: import.meta.env["VITE_ALICE_WS_URL"] || undefined,
 };
 const bobConnection: Connection = {
-  url: import.meta.env["VITE_BOB_API_URL"] || "http://localhost:6011",
+  url: import.meta.env["VITE_BOB_API_URL"] || "/api/bob",
   token: "demo-token-bob",
   wsUrl: import.meta.env["VITE_BOB_WS_URL"] || undefined,
 };
