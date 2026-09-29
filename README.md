@@ -223,10 +223,3 @@ The frontend uses TypeScript and Vite.
 - [Frontend UX Notes](docs/FRONTEND_UX.md)
 
 ---
-
-<div align="center">
-
-**Blockchain-Simulation**  
-*Explore consensus. Simulate attacks. Watch the network.*
-
-</div>
