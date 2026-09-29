@@ -114,7 +114,7 @@ See [Docker Setup](docs/DOCKER.md) for more details.
 
 The system is composed of a web dashboard, REST API, signalling service, and a network of blockchain peers.
 
-<img width="1536" height="1024" alt="ChatGPT Image Sep 30, 2026, 01_33_40 AM" src="https://github.com/user-attachments/assets/b2b14ccc-bf17-410b-98a7-c34e35a1b3ba" />
+<img width="1536" height="1024" alt="Diagram" src="https://github.com/user-attachments/assets/b2b14ccc-bf17-410b-98a7-c34e35a1b3ba" />
 
 
 
