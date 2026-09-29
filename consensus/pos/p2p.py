@@ -549,6 +549,15 @@ class Peer:
             if Chain.instance.transaction_exists_in_chain(transaction):
                 print(f"{self.name} Transaction already exists in chain")
                 return
+            if any(t.id == transaction.id for t in self.mem_pool):
+                # Network delivery isn't exactly-once (self-loops, multi-path
+                # gossip, retries) - the chain-membership check above only
+                # catches already-confirmed txs, not ones already sitting in
+                # our own mempool. Without this, the same transaction can be
+                # appended twice, doubling its counted value everywhere
+                # (pending balance, mempool totals) until it's mined.
+                print(f"{self.name} Transaction already in mempool")
+                return
 
             if transaction.receiver == "deploy":
                 if not self.valid_deploy_transaction(transaction.payload):

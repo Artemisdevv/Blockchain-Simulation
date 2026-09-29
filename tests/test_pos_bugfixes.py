@@ -3,6 +3,8 @@ Regression tests for the three PoS consensus bugs fixed in issue #3.
 Run: pytest test_pos_bugfixes.py -v
 """
 import asyncio
+import base64
+import json
 import pytest
 
 from consensus.pos.blockchain_structures import (
@@ -340,6 +342,74 @@ def test_isvalidblock_rejects_forged_genesis_mint_without_faucet_signature():
     finally:
         if original_instance is not None:
             PosChain.instance = original_instance
+
+
+# --- Bug 7: a looped-back new_tx broadcast could double-append into our own mempool ---
+
+def test_new_tx_handler_does_not_double_append_when_already_in_own_mempool():
+    """
+    Reproduces the live "+50 shows as +100 pending" bug. handle_messages'
+    new_tx branch ends by relaying every valid transaction onward
+    (await self.broadcast_message(msg)) - in a full mesh, alice sends to
+    bob, bob relays to everyone including alice. The faucet handler
+    appends its mint to its own mempool directly (bypassing
+    handle_messages/seen_message_ids entirely) and never registered its
+    own message id in seen_message_ids before broadcasting, unlike
+    create_and_broadcast_tx, which does - so when bob's relay brings it
+    back to alice, her own top-level "already seen" guard doesn't
+    recognize it and lets it through. transaction_exists_in_chain() only
+    checks confirmed transactions, not the mempool, so without an
+    explicit mempool-id check the relayed copy gets appended a second
+    time, doubling everything derived from it (pending balance, mempool
+    totals) until it's mined.
+    """
+    from shared_blockchain_structures import FAUCET_SIGNING_KEY
+
+    receiver = make_wallet()
+    genesis = make_block(None, [])
+    genesis.creator = receiver.public_key_pem
+    genesis.sign = receiver.private_key.sign(str(genesis).encode())
+
+    class FakeChain:
+        instance = None
+        def __init__(self):
+            self.chain = [genesis]
+        def transaction_exists_in_chain(self, tx):
+            return False
+    FakeChain.instance = FakeChain()
+
+    import consensus.pos.p2p as p2p_module
+    original_chain = p2p_module.Chain.instance
+    p2p_module.Chain.instance = FakeChain.instance
+    try:
+        peer = Peer.__new__(Peer)
+        peer.name = "alice"
+        peer.mem_pool_lock = asyncio.Lock()
+        peer.seen_message_ids = set()
+        peer.current_stakes = set()
+        peer.server_connections = set()
+        peer.client_connections = set()
+
+        mint_tx = Transaction(50, "Genesis", receiver.public_key_pem, id="loop-1")
+        mint_tx.sign = FAUCET_SIGNING_KEY.sign(str(mint_tx).encode())
+
+        # The faucet's local append - happens outside handle_messages, so
+        # it never touches seen_message_ids.
+        peer.mem_pool = [mint_tx]
+
+        pkt = {
+            "type": "new_tx",
+            "id": "some-other-envelope-id",  # simulates the missing seen_message_ids registration
+            "transaction": json.dumps(mint_tx.to_dict()),
+            "sign": base64.b64encode(mint_tx.sign).decode(),
+            "sender_pem": "Genesis",
+        }
+
+        asyncio.run(peer.handle_messages(None, pkt))
+
+        assert len(peer.mem_pool) == 1
+    finally:
+        p2p_module.Chain.instance = original_chain
 
 
 if __name__ == "__main__":

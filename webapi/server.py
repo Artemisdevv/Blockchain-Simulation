@@ -393,6 +393,16 @@ def create_app(peer, loop, token, limiter: RateLimiter, auth_tracker: FailedAuth
                 "sign": base64.b64encode(faucet_tx.sign).decode(),
                 "sender_pem": "Genesis"
             }
+            # create_and_broadcast_tx registers its message id in
+            # seen_message_ids *before* broadcasting, so handle_messages'
+            # top-level "if id in self.seen_message_ids: return" catches
+            # it when a peer relays it back to us (handle_messages' new_tx
+            # branch always relays onward - in a full mesh that means it
+            # comes right back). This was missing here, so a relayed
+            # faucet broadcast would sail past that guard and get
+            # double-appended to our own mempool - doubling the amount
+            # shown as pending everywhere until it's mined.
+            peer.seen_message_ids.add(pkt["id"])
             await peer.broadcast_message(pkt)
 
         run_coro(_add_and_broadcast_faucet())

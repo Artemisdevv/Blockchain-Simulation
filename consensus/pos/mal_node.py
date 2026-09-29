@@ -495,6 +495,9 @@ class Peer:
             if Chain.instance.transaction_exists_in_chain(transaction):
                 print(f"{self.name} Transaction already exists in chain")
                 return
+            if any(t.id == transaction.id for t in self.mem_pool):
+                print(f"{self.name} Transaction already in mempool")
+                return
 
             if transaction.receiver == "deploy":
                 if not self.valid_deploy_transaction(transaction.payload):
