@@ -226,7 +226,14 @@ def create_app(peer, loop, token, limiter: RateLimiter, auth_tracker: FailedAuth
             b.slash_creator and b.creator == peer.wallet.public_key_pem
             for b in Chain.instance.chain
         )
-        display_balance = raw_balance if is_slashed else max(0, raw_balance)
+
+        # Include pending incoming faucet coins in mempool
+        pending_faucet_income = sum(
+            tx.payload for tx in peer.mem_pool
+            if tx.receiver == peer.wallet.public_key_pem and tx.sender == "Genesis"
+        )
+
+        display_balance = (raw_balance + pending_faucet_income) if is_slashed else max(0, raw_balance + pending_faucet_income)
         return jsonify({"public_key": peer.wallet.public_key_pem, "balance": display_balance})
 
     @app.post("/transactions")
