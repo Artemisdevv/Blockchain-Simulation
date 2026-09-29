@@ -1,0 +1,14 @@
+venv/
+myenv/
+newEnv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.git/
+.env
+.webapi_token_*
+storage/poa/
+storage/pos/
+storage/pow/
+node_modules/
+web/dist/

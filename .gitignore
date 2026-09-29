@@ -8,6 +8,7 @@ newEnv/
 # Python cache and bytecode files
 __pycache__/
 *.pyc
+.pytest_cache/
 
 # Temporary files
 haha.txt
