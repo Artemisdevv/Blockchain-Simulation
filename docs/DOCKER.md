@@ -4,6 +4,9 @@
 docker compose up -d --build
 ```
 
+The project shows up in Docker Desktop as **blockchain-simulation** (set via
+`name:` in docker-compose.yml, not derived from the folder name).
+
 Brings up:
 - `signalling` — room-discovery server, port `7000`
 - `peer-alice`, `peer-bob` — honest PoS stakers, joined via room `demo`.
@@ -43,6 +46,29 @@ Use the menu (option 9 to stake, whatever mal_node.py's malicious flow
 requires) to trigger the double-sign. Detach without killing the container
 with `Ctrl+P` then `Ctrl+Q` (a plain `Ctrl+C` will send SIGINT to the
 container's process).
+
+## Scaling to more nodes
+
+`alice`/`bob`/`mallory` are fixed, named services (deliberately - the demo
+story needs named characters). To add more nodes dynamically instead of
+editing the compose file, there's a 4th service, `peer-swarm`, with no fixed
+name or published ports:
+
+```
+docker compose up -d --scale peer-swarm=10
+```
+
+Each replica auto-detects and advertises its own real container IP
+(`AUTO_DETECT_HOST=true` - see `detect_own_ip()` in `start_peer.py`) rather
+than a shared hostname, since Docker's internal DNS doesn't resolve an
+auto-generated container hostname the way it resolves a service name.
+Duplicate `PEER_NAME=swarm` values are handled by the app itself - it
+already auto-renames collisions (`swarm`, `swarm1`, `swarm2`, ...) as part
+of the normal peer-registration handshake, no extra code needed for that.
+
+Verified live with 3 replicas: each one showed up in the others' peer lists
+under its own real IP and a de-duplicated name, all bootstrapped through the
+room the same way alice/bob/mallory do.
 
 ## Logs / cleanup
 

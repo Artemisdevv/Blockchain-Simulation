@@ -1,3 +1,5 @@
+name: blockchain-simulation
+
 services:
   signalling:
     build:
@@ -96,3 +98,35 @@ services:
       SIGNALLING_PORT: "7000"
       ROOM_ID: demo
       MALICIOUS: "y"
+
+  peer-swarm:
+    # Anonymous, scalable filler nodes for a "look, it handles N nodes"
+    # moment - not part of the named demo story (that's alice/bob/mallory).
+    # Run with: docker compose up --scale peer-swarm=10 -d
+    # No fixed name/ports (can't be, when scaled) - PEER_NAME collisions are
+    # already handled by the app itself (get_unique_name appends a counter),
+    # and AUTO_DETECT_HOST makes each replica advertise its own real IP
+    # instead of a shared hostname that would only resolve to one of them.
+    build:
+      context: .
+      dockerfile: Dockerfile.peer
+    tty: true
+    stdin_open: true
+    depends_on:
+      signalling:
+        condition: service_healthy
+      peer-alice:
+        condition: service_started
+    environment:
+      AUTO_DETECT_HOST: "true"
+      PEER_PORT: "5000"
+      PEER_NAME: swarm
+      CONSENSUS: pos
+      DISK_LOAD: "n"
+      DISK_SAVE: "n"
+      ACTION: room
+      SIGNALLING_HOST: signalling
+      SIGNALLING_PORT: "7000"
+      ROOM_ID: demo
+      MALICIOUS: "n"
+      STAKER: "n"

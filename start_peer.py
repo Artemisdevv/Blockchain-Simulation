@@ -1,5 +1,6 @@
 import asyncio
 import os
+import socket
 from dotenv import load_dotenv
 from consensus.poa.p2p import Peer as PoAPeer
 from consensus.pos.p2p import Peer as PoSPeer
@@ -32,10 +33,31 @@ def get_bool(name, prompt):
     return input(prompt).strip().lower() == "y"
 
 
+def detect_own_ip():
+    """
+    Finds this container/machine's own outward-facing IP without needing
+    real connectivity - a UDP "connect" just picks the right local
+    interface for the OS's routing table, it never actually sends a packet.
+    Used for AUTO_DETECT_HOST so a scaled batch of identical containers
+    (docker compose up --scale peer-swarm=N) can each advertise their own
+    real IP instead of a shared hostname that only resolves to one of them.
+    """
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        s.connect(("8.8.8.8", 80))
+        return s.getsockname()[0]
+    finally:
+        s.close()
+
+
 def start_peer():
     load_dotenv()  # loads .env into os.environ if present; no-op otherwise
 
-    host = get_env_or_input("PEER_HOST", "Enter Host: ")
+    auto_detect_host = os.getenv("AUTO_DETECT_HOST", "").strip().lower() in ("true", "1", "yes", "y")
+    if auto_detect_host:
+        host = detect_own_ip()
+    else:
+        host = get_env_or_input("PEER_HOST", "Enter Host: ")
     port = get_env_or_input("PEER_PORT", "Enter Port: ", int)
     name = get_env_or_input("PEER_NAME", "Enter Name: ")
 
