@@ -1,0 +1,98 @@
+services:
+  signalling:
+    build:
+      context: .
+      dockerfile: Dockerfile.signalling
+    ports:
+      - "7000:7000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; socket.create_connection(('localhost', 7000), timeout=2)"]
+      interval: 3s
+      timeout: 2s
+      retries: 10
+      start_period: 5s
+
+  peer-alice:
+    build:
+      context: .
+      dockerfile: Dockerfile.peer
+    # The CLI menu loop calls input() unconditionally - without a tty that's
+    # an immediate EOFError and the whole process dies. A tty makes it block
+    # instead, which is fine: pos peers are driven via the web API, the menu
+    # just sits there unused.
+    tty: true
+    stdin_open: true
+    depends_on:
+      signalling:
+        condition: service_healthy
+    environment:
+      PEER_HOST: peer-alice
+      PEER_PORT: "5000"
+      PEER_NAME: alice
+      CONSENSUS: pos
+      DISK_LOAD: "n"
+      DISK_SAVE: "n"
+      ACTION: room
+      SIGNALLING_HOST: signalling
+      SIGNALLING_PORT: "7000"
+      ROOM_ID: demo
+      MALICIOUS: "n"
+      STAKER: "y"
+    ports:
+      - "6001:6000"  # web API
+      - "6002:6001"  # events websocket
+
+  peer-bob:
+    build:
+      context: .
+      dockerfile: Dockerfile.peer
+    tty: true
+    stdin_open: true
+    depends_on:
+      signalling:
+        condition: service_healthy
+      peer-alice:
+        condition: service_started
+    environment:
+      PEER_HOST: peer-bob
+      PEER_PORT: "5000"
+      PEER_NAME: bob
+      CONSENSUS: pos
+      DISK_LOAD: "n"
+      DISK_SAVE: "n"
+      ACTION: room
+      SIGNALLING_HOST: signalling
+      SIGNALLING_PORT: "7000"
+      ROOM_ID: demo
+      MALICIOUS: "n"
+      STAKER: "y"
+    ports:
+      - "6011:6000"
+      - "6012:6001"
+
+  peer-mallory:
+    # Malicious node (mal_node.py) - double-signs to demo the slashing
+    # detection fixed in issue #3. No web API on malicious peers by design
+    # (see enable_api in start_peer.py), so no ports published here.
+    build:
+      context: .
+      dockerfile: Dockerfile.peer
+    tty: true
+    stdin_open: true
+    depends_on:
+      signalling:
+        condition: service_healthy
+      peer-alice:
+        condition: service_started
+    environment:
+      PEER_HOST: peer-mallory
+      PEER_PORT: "5000"
+      PEER_NAME: mallory
+      CONSENSUS: pos
+      DISK_LOAD: "n"
+      DISK_SAVE: "n"
+      ACTION: room
+      SIGNALLING_HOST: signalling
+      SIGNALLING_PORT: "7000"
+      ROOM_ID: demo
+      MALICIOUS: "y"

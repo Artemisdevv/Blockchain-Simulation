@@ -11,7 +11,7 @@ import websockets
 
 
 async def join_room(sig_host, sig_port, room_id, my_host, my_port, my_name, my_public_key,
-                     on_peer_joined=None):
+                     on_peer_joined=None, connect_retries=5, retry_delay_seconds=2):
     """
     Joins `room_id` on the signalling server and returns the list of peers
     already registered in that room (empty list if we're first to join).
@@ -20,9 +20,26 @@ async def join_room(sig_host, sig_port, room_id, my_host, my_port, my_name, my_p
     calls it with a peer dict for every node that joins the room later -
     lets an already-running node proactively connect to late joiners.
     Returns (initial_peers, listener_task_or_None).
+
+    Retries the initial connection a few times before giving up - a
+    container/process can easily start a beat before the signalling server
+    is actually accepting connections (e.g. docker-compose startup order is
+    "container started", not "server ready").
     """
     uri = f"ws://{sig_host}:{sig_port}"
-    websocket = await websockets.connect(uri)
+    websocket = None
+    last_error = None
+    for attempt in range(connect_retries):
+        try:
+            websocket = await websockets.connect(uri)
+            break
+        except OSError as e:
+            last_error = e
+            if attempt < connect_retries - 1:
+                print(f"Signalling server not reachable yet ({e}), retrying in {retry_delay_seconds}s ({attempt + 1}/{connect_retries})...")
+                await asyncio.sleep(retry_delay_seconds)
+    if websocket is None:
+        raise ConnectionError(f"Could not reach signalling server at {uri} after {connect_retries} attempts") from last_error
 
     await websocket.send(json.dumps({
         "type": "join",
