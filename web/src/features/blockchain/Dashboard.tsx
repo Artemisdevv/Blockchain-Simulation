@@ -1543,20 +1543,31 @@ function AttackLab({
             <ShieldCheck className="h-4 w-4 text-success" />
             <span>Target Malicious Node</span>
           </div>
-          <div className="rounded-lg border border-border p-3 text-xs space-y-2 bg-muted/30">
-            <div className="flex justify-between font-medium">
-              <span>Node Name</span>
-              <span className="font-mono text-destructive font-bold">mallory</span>
+          {managedPeers.filter((item) => item.role === "malicious").length === 0 ? (
+            <div className="rounded-lg border border-dashed border-border p-3 text-xs text-muted-foreground">
+              No malicious node is running. Join one from the join screen with "Join as a malicious node"
+              ticked; it will double-sign conflicting blocks whenever it is elected.
             </div>
-            <div className="flex justify-between text-muted-foreground">
-              <span>Behavior</span>
-              <span>Double-Sign Conflicting Blocks</span>
-            </div>
-            <div className="flex justify-between text-muted-foreground">
-              <span>API Status</span>
-              <span className="text-success">Isolated (P2P Mesh)</span>
-            </div>
-          </div>
+          ) : (
+            managedPeers
+              .filter((item) => item.role === "malicious")
+              .map((item) => (
+                <div key={item.peer_id} className="rounded-lg border border-border p-3 text-xs space-y-2 bg-muted/30">
+                  <div className="flex justify-between font-medium">
+                    <span>Node Name</span>
+                    <span className="font-mono text-destructive font-bold">{item.name}</span>
+                  </div>
+                  <div className="flex justify-between text-muted-foreground">
+                    <span>Room</span>
+                    <span className="font-mono">{item.room_id}</span>
+                  </div>
+                  <div className="flex justify-between text-muted-foreground">
+                    <span>Behavior</span>
+                    <span>Double-Sign Conflicting Blocks</span>
+                  </div>
+                </div>
+              ))
+          )}
         </div>
 
         <div className="panel p-5 space-y-3">

@@ -37,6 +37,7 @@ PORT_STEP = int(os.environ.get("PEER_MANAGER_PORT_STEP", "100"))
 MAX_PEERS = int(os.environ.get("PEER_MANAGER_MAX_PEERS", "9"))
 # Peers whose dashboard has not touched the API for this long are stopped.
 IDLE_TIMEOUT = float(os.environ.get("PEER_MANAGER_IDLE_TIMEOUT", "120"))
+ROLES = ("honest", "malicious")
 PEER_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,31}$")
 ROOM_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
 PROJECT_ROOT = Path(__file__).resolve().parent
@@ -157,6 +158,7 @@ class ManagedPeer:
     token: str
     process: subprocess.Popen
     last_seen: float = 0.0
+    role: str = "honest"
 
 
 class PeerManager:
@@ -190,7 +192,11 @@ class PeerManager:
             if current is None or run.started_at > current.started_at:
                 self.runs[run.room_id] = run
 
-    def start_peer(self, name, room_id):
+    def start_peer(self, name, room_id, role="honest"):
+        role = str(role or "honest").strip().lower()
+        if role not in ROLES:
+            raise ValueError("Role must be 'honest' or 'malicious'.")
+        malicious = role == "malicious"
         name = str(name or "").strip()
         room_id = str(room_id or "").strip()
         if not PEER_NAME_RE.fullmatch(name):
@@ -225,11 +231,12 @@ class PeerManager:
                 "SIGNALLING_HOST": os.environ.get("SIGNALLING_HOST", "signalling"),
                 "SIGNALLING_PORT": os.environ.get("SIGNALLING_PORT", "7000"),
                 "ROOM_ID": room_id,
-                "MALICIOUS": "n",
+                "MALICIOUS": "y" if malicious else "n",
                 "STAKER": "y",
-                # Off by default: with several auto-stakers a node can still fall a
-                # block behind. Flip it on per node from the dashboard toggle.
-                "AUTO_STAKE": "false",
+                # Honest nodes start with auto-stake off (several auto-stakers can still
+                # fall a block behind; flip it from the dashboard toggle). A malicious
+                # node stakes automatically, otherwise it never gets to attack.
+                "AUTO_STAKE": "true" if malicious else "false",
                 "PYTHONUNBUFFERED": "1",
                 "WEBAPI_HOST": "0.0.0.0",
                 "WEBAPI_TOKEN": token,
@@ -239,7 +246,7 @@ class PeerManager:
                 cwd=str(PROJECT_ROOT),
                 env=env,
             )
-            managed = ManagedPeer(peer_id, name, room_id, port, token, process, time.monotonic())
+            managed = ManagedPeer(peer_id, name, room_id, port, token, process, time.monotonic(), role)
             self.peers[peer_id] = managed
             run = self.begin_run(room_id)
             run.participants[peer_id] = {"peer_id": peer_id, "name": name, "first_seen_at": time.time(), "last_seen_at": time.time()}
@@ -447,7 +454,7 @@ def create_app(manager=None):
     def create_peer():
         data = request.get_json(silent=True) or {}
         try:
-            peer = manager.start_peer(data.get("name"), data.get("room_id"))
+            peer = manager.start_peer(data.get("name"), data.get("room_id"), data.get("role", "honest"))
         except ValueError as exc:
             return jsonify({"error": str(exc)}), 400
         except RuntimeError as exc:
@@ -456,6 +463,7 @@ def create_app(manager=None):
             "peer_id": peer.peer_id,
             "name": peer.name,
             "room_id": peer.room_id,
+            "role": peer.role,
             "token": peer.token,
         }), 201
 
@@ -479,7 +487,7 @@ def create_app(manager=None):
         with manager._lock:
             manager._reap_exited()
             peers = [
-                {"peer_id": peer.peer_id, "name": peer.name, "room_id": peer.room_id}
+                {"peer_id": peer.peer_id, "name": peer.name, "room_id": peer.room_id, "role": peer.role}
                 for peer in manager.peers.values()
             ]
         return jsonify({"peers": peers})

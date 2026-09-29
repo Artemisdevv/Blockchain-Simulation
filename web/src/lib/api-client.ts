@@ -16,15 +16,19 @@ export interface Connection {
   readOnly?: boolean;
 }
 
+export type PeerRole = "honest" | "malicious";
+
 export interface RoomPeerRequest {
   name: string;
   room_id: string;
+  role?: PeerRole;
 }
 
 export interface RoomPeerResponse {
   peer_id: string;
   name: string;
   room_id: string;
+  role?: PeerRole;
   token: string;
 }
 
@@ -81,6 +85,7 @@ export interface ManagedPeerSummary {
   peer_id: string;
   name: string;
   room_id: string;
+  role?: PeerRole;
 }
 
 export async function listManagedPeers(): Promise<ManagedPeerSummary[]> {

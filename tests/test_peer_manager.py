@@ -120,3 +120,32 @@ def test_delete_endpoint_needs_a_token_from_the_same_room():
     assert a.process.returncode == 0
     assert client.delete(f"/peers/{b.peer_id}", headers=auth(b)).status_code == 200
     assert client.delete(f"/peers/{b.peer_id}", headers=auth(b)).status_code == 404
+
+
+def test_malicious_role_sets_env_and_auto_stakes():
+    created = []
+
+    def factory(command, **kwargs):
+        process = FakeProcess(command, **kwargs)
+        created.append(process)
+        return process
+
+    manager = PeerManager(process_factory=factory, request_get=lambda *a, **k: FakeResponse())
+    honest = manager.start_peer("h", "room")
+    evil = manager.start_peer("m", "room", role="malicious")
+
+    assert honest.role == "honest" and evil.role == "malicious"
+    assert created[0].kwargs["env"]["MALICIOUS"] == "n" and created[0].kwargs["env"]["AUTO_STAKE"] == "false"
+    assert created[1].kwargs["env"]["MALICIOUS"] == "y" and created[1].kwargs["env"]["AUTO_STAKE"] == "true"
+
+
+def test_unknown_role_is_rejected_and_listed_with_role():
+    manager = _manager()
+    with pytest.raises(ValueError, match="Role"):
+        manager.start_peer("x", "room", role="admin")
+
+    manager.start_peer("m", "room", role="malicious")
+    client = create_app(manager)[0].test_client()
+    listed = client.get("/peers").json["peers"]
+    assert [(p["name"], p["role"]) for p in listed] == [("m", "malicious")]
+    assert client.post("/peers", json={"name": "y", "room_id": "room", "role": "admin"}).status_code == 400
