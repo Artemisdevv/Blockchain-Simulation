@@ -253,7 +253,7 @@ class Peer:
                 transaction.sign=base64.b64decode(transaction_dict["sign"])
             transactions.append(transaction)
         
-        if(not(new_block_id and new_block_ts and transactions)): # Genesis block doesn't have prevHash, it's an empty string
+        if(not(new_block_id and new_block_ts)): # empty blocks are valid (see p2p.py) # Genesis block doesn't have prevHash, it's an empty string
             return None
         
         newBlock=Block(new_block_prevHash, transactions, new_block_ts, new_block_id)   

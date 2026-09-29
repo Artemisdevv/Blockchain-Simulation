@@ -257,7 +257,10 @@ class Peer:
                 transaction.sign=base64.b64decode(transaction_dict["sign"])
             transactions.append(transaction)
         
-        if(not(new_block_id and new_block_ts and transactions)): # Genesis block doesn't have prevHash, it's an empty string
+        # Genesis block doesn't have prevHash, it's an empty string. A block may
+        # legitimately carry zero transactions: create_blocks() mints empty blocks
+        # each epoch to rotate stakers, so an empty list must not be rejected.
+        if(not(new_block_id and new_block_ts)):
             return None
         
         newBlock=Block(new_block_prevHash, transactions, new_block_ts, new_block_id)   
@@ -675,6 +678,9 @@ class Peer:
                 return
             
             newBlock = self.block_dict_to_block(new_block_dict)
+            if newBlock is None:
+                print("\nInvalid Block (malformed)\n")
+                return
 
             if not Chain.instance.isValidBlock(newBlock):
                 print("\nInvalid Block\n")
@@ -919,6 +925,9 @@ class Peer:
 
             for block_dict in block_dict_list:
                 block = self.block_dict_to_block(block_dict)
+                if block is None:
+                    print("\nInvalid Chain (malformed block)\n")
+                    return
                 block_list.append(block)
 
             if not isvalidChain(block_list):

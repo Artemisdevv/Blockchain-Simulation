@@ -91,6 +91,7 @@ class PeerManager:
                 "MALICIOUS": "n",
                 "STAKER": "y",
                 "AUTO_STAKE": "true",
+                "PYTHONUNBUFFERED": "1",
                 "WEBAPI_HOST": "0.0.0.0",
                 "WEBAPI_TOKEN": token,
             })
