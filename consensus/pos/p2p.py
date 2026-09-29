@@ -1516,16 +1516,11 @@ class Peer:
         for transaction in transactions_in_mem_pool:
             if(not Chain.instance.transaction_exists_in_chain(transaction)):
                 pending_transactions.append(transaction)
-        
-        if(len(pending_transactions)<=0):
-            print("\nNo pending transactions\n")
-            self.last_epoch_end_ts=datetime.now()
-            self.staked_amt=0
-            async with self.curr_stakers_condition:
-                self.current_stakers.clear()
-                self.current_stakes.clear()
-            return
-        
+
+        # No early-return on an empty mempool here: a PoS chain still needs
+        # to produce (possibly empty) blocks every epoch to rotate stakers
+        # and pay out the miner reward, regardless of whether anyone
+        # happened to send a transaction that epoch.
         print("\nRunning vrf\n")
         async with self.curr_stakers_condition:# So that no new stakes don't comes in
             seed=Chain.instance.epoch_seed()

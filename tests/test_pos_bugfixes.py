@@ -102,6 +102,68 @@ def test_verify_and_slash_detects_genuine_double_sign():
     assert FakeChain.chain[0].slash_creator is True
 
 
+# --- Bug 4 (issue #19): block production required a pending transaction ---
+
+def test_block_production_does_not_require_pending_transactions():
+    """
+    Before the fix, create_blocks() bailed out (clearing the epoch's
+    stakers, never running the VRF lottery) whenever mempool had no
+    pending transactions - so a lone staker with nothing to send could
+    never actually produce a block, and the chain could never advance.
+    """
+    creator = make_wallet()
+
+    genesis = make_block(None, [])
+    genesis.creator = creator.public_key_pem
+    genesis.sign = creator.private_key.sign(str(genesis).encode())
+
+    class FakeChain:
+        chain = [genesis]
+        instance = None
+
+        @property
+        def lastBlock(self):
+            return self.chain[-1]
+
+        def epoch_seed(self):
+            return "fixed-test-seed"
+
+        def transaction_exists_in_chain(self, tx):
+            return False
+    FakeChain.instance = FakeChain()
+
+    import consensus.pos.p2p as p2p_module
+    original_chain = p2p_module.Chain.instance
+    p2p_module.Chain.instance = FakeChain.instance
+    try:
+        peer = Peer.__new__(Peer)
+        peer.staker = True
+        peer.wallet = creator
+        peer.mem_pool = []  # no pending transactions
+        peer.mem_pool_lock = asyncio.Lock()
+        peer.file_hashes = {}
+        peer.file_hashes_lock = asyncio.Lock()
+        peer.current_stakers = {creator.public_key_pem: 50}
+        peer.current_stakes = set()
+        peer.staked_amt = 50  # sole staker -> deterministically wins the VRF
+        peer.curr_stakers_condition = asyncio.Condition()
+        peer.last_epoch_end_ts = None
+        peer.activate_disk_save = "n"
+        peer.server_connections = set()
+        peer.client_connections = set()
+        peer.seen_message_ids = set()
+
+        asyncio.run(peer.create_blocks(0))
+    finally:
+        p2p_module.Chain.instance = original_chain
+
+    assert len(FakeChain.instance.chain) == 2, (
+        "sole staker with no pending transactions should still win the "
+        "lottery and produce an (empty) block"
+    )
+    assert FakeChain.instance.chain[1].creator == creator.public_key_pem
+
+
 if __name__ == "__main__":
     import sys
     sys.exit(pytest.main([__file__, "-v"]))
