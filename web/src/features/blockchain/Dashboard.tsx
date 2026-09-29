@@ -454,6 +454,7 @@ export function Dashboard({
               </div>
             </div>
 
+            <div key={view} className="animate-in fade-in-0 slide-in-from-bottom-1 duration-400">
             {view === "overview" && (
               <Overview
                 balance={balance}
@@ -531,6 +532,7 @@ export function Dashboard({
                 onRefresh={refreshAll}
               />
             ))}
+            </div>
           </div>
         </main>
       </div>
