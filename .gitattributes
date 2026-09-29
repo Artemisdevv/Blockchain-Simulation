@@ -1,0 +1,4 @@
+# Force LF line endings regardless of platform/core.autocrlf - avoids
+# every JS/TS file in web/ showing as "changed" (and ESLint's Prettier
+# rule flagging every line) purely from Windows checkout converting to CRLF.
+* text=auto eol=lf

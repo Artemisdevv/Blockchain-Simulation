@@ -152,6 +152,13 @@ Persistent storage is implemented to enable nodes to reconnect to the network us
 - We have tested our blockchain networks using this malicious nodes to verify that our protocols are working and that our network is functional
 
 ## How to run this project
+
+**Quickest path (Docker + web dashboard):** `docker compose up -d --build`
+for the network (see `docs/DOCKER.md`), then `cd web && npm install && npm
+run dev` for the dashboard (see `web/README.md` for how to get a peer's
+auth token and connect). The manual/interactive setup below is the
+alternative if you're not using Docker.
+
 ### Prerequisites
 - `python 3.10+`
 - `pip` (python package manager)
