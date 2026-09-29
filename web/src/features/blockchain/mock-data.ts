@@ -44,9 +44,18 @@ export interface PeersResponse {
 export interface MempoolResponse {
   transactions: Transaction[];
 }
+/** How the next leader is chosen: see elect_leader / election_details on the backend. */
+export interface ElectionDetails {
+  seed: string;
+  total: number;
+  pick: number | null;
+  leader: string | null;
+  ranges: Array<{ staker: string; amount: number; start: number; end: number }>;
+}
 export interface StakersResponse {
   stakers: Record<string, number>;
   epoch_ends_in_seconds: number;
+  election?: ElectionDetails | null;
 }
 export interface BalanceResponse {
   public_key: string;

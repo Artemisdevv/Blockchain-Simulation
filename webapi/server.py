@@ -334,9 +334,14 @@ def create_app(peer, loop, token, limiter: RateLimiter, auth_tracker: FailedAuth
     @app.get("/stakers")
     def get_stakers():
         elapsed = (datetime.now() - peer.last_epoch_end_ts).seconds
+        election = None
+        if Chain.instance and len(Chain.instance.chain) > 0:
+            from consensus.pos.blockchain_structures import election_details
+            election = election_details(Chain.instance.epoch_seed(), dict(peer.current_stakers))
         return jsonify({
             "stakers": dict(peer.current_stakers),
             "epoch_ends_in_seconds": max(0, EPOCH_TIME - elapsed),
+            "election": election,
         })
 
     @app.get("/balance")
