@@ -26,6 +26,7 @@ from flask import Flask, jsonify, request
 from flask_cors import CORS
 
 from consensus.pos.blockchain_structures import Chain
+from webapi.rate_limit import RateLimiter, FailedAuthTracker
 
 EPOCH_TIME = 60  # kept in sync with consensus/pos/p2p.py's EPOCH_TIME
 
@@ -34,17 +35,34 @@ EPOCH_TIME = 60  # kept in sync with consensus/pos/p2p.py's EPOCH_TIME
 # malicious website open in someone's browser from silently calling this API.
 _ALLOWED_ORIGIN_PATTERN = r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$"
 
+MAX_REQUESTS_PER_MINUTE = 60
+MAX_AUTH_FAILURES = 5
+AUTH_FAILURE_WINDOW_SECONDS = 60
+AUTH_BLOCK_SECONDS = 300
 
-def create_app(peer, loop, token):
+
+def create_app(peer, loop, token, limiter: RateLimiter, auth_tracker: FailedAuthTracker):
     app = Flask(__name__)
+    app.config["MAX_CONTENT_LENGTH"] = 16 * 1024  # reject oversized request bodies
     CORS(app, origins=_ALLOWED_ORIGIN_PATTERN, supports_credentials=False)
 
     @app.before_request
     def require_token():
+        client = request.remote_addr or "unknown"
+
+        if auth_tracker.is_blocked(client):
+            return jsonify({"ok": False, "error": "too many failed auth attempts, try again later"}), 429
+
+        if not limiter.allow(client):
+            return jsonify({"ok": False, "error": "rate limit exceeded"}), 429
+
         auth = request.headers.get("Authorization", "")
         provided = auth[len("Bearer "):] if auth.startswith("Bearer ") else None
         if not provided or not secrets.compare_digest(provided, token):
+            auth_tracker.record_failure(client)
             return jsonify({"ok": False, "error": "missing or invalid bearer token"}), 401
+
+        auth_tracker.record_success(client)
 
     def run_coro(coro, timeout=10):
         future = asyncio.run_coroutine_threadsafe(coro, loop)
@@ -129,7 +147,7 @@ def create_app(peer, loop, token):
     return app
 
 
-def run_api_server(peer, loop, http_port):
+def run_api_server(peer, loop, http_port, limiter=None, auth_tracker=None):
     """
     Starts the Flask app in a background daemon thread. Call this from
     inside the peer's running event loop (needs `loop` = the actual running
@@ -139,6 +157,10 @@ def run_api_server(peer, loop, http_port):
     Binds to 127.0.0.1 by default - set WEBAPI_HOST=0.0.0.0 explicitly
     (e.g. inside a docker container reached only via published ports) to
     expose it beyond localhost. Auth token is required regardless.
+
+    Pass a shared `limiter`/`auth_tracker` (see webapi/rate_limit.py) if the
+    events websocket is also running, so a source blocked on one surface is
+    blocked on both. Standalone use creates its own if omitted.
     """
     token = secrets.token_urlsafe(32)
     token_path = f".webapi_token_{http_port}"
@@ -149,8 +171,11 @@ def run_api_server(peer, loop, http_port):
     except OSError:
         pass
 
+    limiter = limiter or RateLimiter(MAX_REQUESTS_PER_MINUTE, 60)
+    auth_tracker = auth_tracker or FailedAuthTracker(MAX_AUTH_FAILURES, AUTH_FAILURE_WINDOW_SECONDS, AUTH_BLOCK_SECONDS)
+
     host = os.environ.get("WEBAPI_HOST", "127.0.0.1")
-    app = create_app(peer, loop, token)
+    app = create_app(peer, loop, token, limiter, auth_tracker)
 
     def _run():
         app.run(host=host, port=http_port, threaded=True, use_reloader=False)
@@ -160,4 +185,4 @@ def run_api_server(peer, loop, http_port):
     print(f"\nWeb API listening on http://{host}:{http_port}")
     print(f"Auth token (also in {token_path}): {token}")
     print(f"Example: curl -H \"Authorization: Bearer {token}\" http://{host}:{http_port}/chain\n")
-    return thread, token
+    return thread, token, limiter, auth_tracker

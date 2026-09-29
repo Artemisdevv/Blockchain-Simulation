@@ -1,5 +1,6 @@
 import asyncio
 import os
+from dotenv import load_dotenv
 from consensus.poa.p2p import Peer as PoAPeer
 from consensus.pos.p2p import Peer as PoSPeer
 from consensus.pow.p2p import Peer as PoWPeer
@@ -32,6 +33,8 @@ def get_bool(name, prompt):
 
 
 def start_peer():
+    load_dotenv()  # loads .env into os.environ if present; no-op otherwise
+
     host = get_env_or_input("PEER_HOST", "Enter Host: ")
     port = get_env_or_input("PEER_PORT", "Enter Port: ", int)
     name = get_env_or_input("PEER_NAME", "Enter Name: ")
@@ -166,9 +169,9 @@ async def run_peer(peer, action, bootstrap_host, bootstrap_port,
         from webapi.server import run_api_server
         from webapi.events import run_events_server
         loop = asyncio.get_running_loop()
-        _, token = run_api_server(peer, loop, api_port)
+        _, token, limiter, auth_tracker = run_api_server(peer, loop, api_port)
         events_host = os.environ.get("WEBAPI_HOST", "127.0.0.1")
-        run_events_server(peer, events_host, api_port + 1, token)
+        run_events_server(peer, events_host, api_port + 1, token, limiter, auth_tracker)
 
     if action == "room":
         from signalling.client import join_room

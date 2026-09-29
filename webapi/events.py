@@ -19,20 +19,41 @@ from urllib.parse import urlparse, parse_qs
 
 import websockets
 
+from webapi.rate_limit import RateLimiter, FailedAuthTracker
 
-def run_events_server(peer, host, port, token):
+MAX_CONNECTIONS_PER_MINUTE = 30
+
+
+def run_events_server(peer, host, port, token, limiter: RateLimiter = None, auth_tracker: FailedAuthTracker = None):
     """
     Schedules the events websocket server as a background task on the
     currently running event loop. Call this from inside the peer's loop
     (e.g. alongside run_api_server in start_peer.py's run_peer()).
+
+    Pass the same `limiter`/`auth_tracker` instances used by run_api_server
+    so a source blocked on the REST API is blocked here too.
     """
+    limiter = limiter or RateLimiter(MAX_CONNECTIONS_PER_MINUTE, 60)
+    auth_tracker = auth_tracker or FailedAuthTracker()
 
     async def handler(websocket):
+        client = websocket.remote_address[0] if websocket.remote_address else "unknown"
+
+        if auth_tracker.is_blocked(client):
+            await websocket.close(code=4429, reason="too many failed auth attempts, try again later")
+            return
+
+        if not limiter.allow(client):
+            await websocket.close(code=4429, reason="rate limit exceeded")
+            return
+
         query = parse_qs(urlparse(websocket.request.path).query)
         provided = (query.get("token") or [None])[0]
         if not provided or not secrets.compare_digest(provided, token):
+            auth_tracker.record_failure(client)
             await websocket.close(code=4401, reason="missing or invalid token")
             return
+        auth_tracker.record_success(client)
 
         peer.event_subscribers.add(websocket)
         try:

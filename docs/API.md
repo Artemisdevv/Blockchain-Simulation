@@ -21,6 +21,15 @@ commit it). No token or a wrong one gets a 401.
 to expose beyond localhost (e.g. inside a docker container reached only via
 a published port) - auth is still required either way.
 
+**Rate limiting & brute-force lockout** (`webapi/rate_limit.py`), shared
+between the REST API and `/events`:
+- Max 60 requests/minute per client IP - exceeding it gets `429`.
+- 5 failed-auth attempts within 60s blocks that IP for 5 minutes - `429` on
+  *every* request from it during the block, even with the correct token
+  (don't let an attacker keep probing once flagged). Frontend should treat
+  `429` as "back off and retry later," not a hard error - show a clear
+  message rather than crashing.
+
 ## REST Endpoints
 
 ### `GET /chain`
