@@ -640,6 +640,7 @@ class Peer:
 
             async with self.mem_pool_lock:
                 self.mem_pool.append(transaction)
+            self.emit_tx_seen(transaction)
             await self.broadcast_message(msg)
 
         elif t == "stake_announcement":
@@ -1180,6 +1181,7 @@ class Peer:
 
         async with self.mem_pool_lock:
                 self.mem_pool.append(transaction)
+        self.emit_tx_seen(transaction)
 
         print("Transaction Created", transaction)
         print("\n")
@@ -1619,9 +1621,20 @@ class Peer:
         faucet_tx.sign=FAUCET_SIGNING_KEY.sign(str(faucet_tx).encode())
         return faucet_tx
 
+    def emit_tx_seen(self, transaction):
+        """Live event for the dashboard's packet animation (sender -> everyone)."""
+        amount=transaction.payload[-1] if isinstance(transaction.payload, list) else transaction.payload
+        asyncio.create_task(self.emit_event({
+            "type": "tx_seen",
+            "sender": transaction.sender,
+            "receiver": transaction.receiver,
+            "amount": amount,
+        }))
+
     async def broadcast_faucet_tx(self, faucet_tx):
         async with self.mem_pool_lock:
             self.mem_pool.append(faucet_tx)
+        self.emit_tx_seen(faucet_tx)
         pkt={
             "type": "new_tx",
             "id": faucet_tx.id,

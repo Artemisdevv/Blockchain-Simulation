@@ -23,16 +23,30 @@ def elect_leader(seed, stakes):
         one block is minted per epoch. (The old per-node VRF lottery let zero
         or several stakers "win" independently, which forked the chain.)
     """
+    return election_details(seed, stakes)["leader"]
+
+def election_details(seed, stakes):
+    """
+        The whole election, laid out so a UI can show *why* a node was picked:
+        stakers are placed in public-key order on a line of length total_stake,
+        `pick` = sha256(seed) mod total_stake is a point on that line, and the
+        staker whose range [start, end) contains it is the leader.
+    """
     live={pk:amt for pk,amt in stakes.items() if amt>0}
     total=sum(live.values())
     if total<=0:
-        return None
+        return {"seed": str(seed), "total": 0, "pick": None, "leader": None, "ranges": []}
     pick=int(hashlib.sha256(str(seed).encode()).hexdigest(), 16) % total
+    ranges=[]
+    start=0
+    leader=None
     for pk in sorted(live):
-        if pick<live[pk]:
-            return pk
-        pick-=live[pk]
-    return None
+        end=start+live[pk]
+        ranges.append({"staker": pk, "amount": live[pk], "start": start, "end": end})
+        if leader is None and start<=pick<end:
+            leader=pk
+        start=end
+    return {"seed": str(seed), "total": total, "pick": pick, "leader": leader, "ranges": ranges}
 
 class Stake:
     def __init__(self, staker:str, amt:int, ts=None):

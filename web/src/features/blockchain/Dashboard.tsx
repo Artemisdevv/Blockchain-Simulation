@@ -9,6 +9,7 @@ import {
   Clock3,
   Coins,
   Database,
+  GraduationCap,
   LogOut,
   Menu,
   Network,
@@ -29,6 +30,8 @@ import { Switch } from "@/components/ui/switch";
 import { BlockDialog, TransactionDialog } from "./DetailDialog";
 import { CopyValue, formatTime, normKey, shortKey } from "./utils";
 import { SpectatorShare } from "./SpectatorShare";
+import { ElectionExplainer } from "./ElectionExplainer";
+import { Tutorial } from "./Tutorial";
 import {
   connectEventsWs,
   fetchAttackLabState,
@@ -94,6 +97,15 @@ export function Dashboard({
   // Live state from container
   const [chain, setChain] = useState<ChainResponse>({ blocks: [] });
   const [peers, setPeers] = useState<PeersResponse>({ peers: [] });
+  // Live "packets" for the network animation: one entry per tx / stake / block event.
+  const [packets, setPackets] = useState<Packet[]>([]);
+  const packetSeq = useRef(0);
+  const addPacket = useCallback((kind: PacketKind, fromKey?: string) => {
+    if (!fromKey) return;
+    const id = ++packetSeq.current;
+    setPackets((current) => [...current.slice(-40), { id, kind, fromKey }]);
+    window.setTimeout(() => setPackets((current) => current.filter((p) => p.id !== id)), 2600);
+  }, []);
   const [autoStake, setAutoStakeState] = useState<{ enabled: boolean; available: boolean }>({
     enabled: false,
     available: false,
@@ -180,7 +192,12 @@ export function Dashboard({
       onError: () => setWsConnected(false),
       onBlockAppended: (block) => {
         setToast("New block appended to chain!");
+        addPacket("block", block?.creator);
         refreshAll();
+      },
+      onTxSeen: (tx) => {
+        // Faucet mints come from "Genesis": show them arriving at the receiver instead.
+        addPacket("tx", tx.sender === "Genesis" ? tx.receiver : tx.sender);
       },
       onPeerDiscovered: (peer) => {
         setToast(`Peer discovered: ${peer.name || peer.host}`);
@@ -192,6 +209,7 @@ export function Dashboard({
       },
       onStakeRegistered: (data) => {
         setToast(`Stake registered: ${data.amount} coins`);
+        addPacket("stake", data.staker);
         fetchStakers(connection).then((s) => {
           setStakers(s);
           setCountdown(s.epoch_ends_in_seconds);
@@ -206,7 +224,7 @@ export function Dashboard({
     });
 
     return () => unsubscribe();
-  }, [connection, refreshAll]);
+  }, [connection, refreshAll, addPacket]);
 
   // Countdown timer decrement
   useEffect(() => {
@@ -241,6 +259,25 @@ export function Dashboard({
   const openView = (next: View) => {
     setView(next);
     setMobileOpen(false);
+  };
+
+  // Guided tour: opens once automatically for a new browser, and from the Tour button.
+  const [tourOpen, setTourOpen] = useState(false);
+  useEffect(() => {
+    if (isSpectator) return;
+    try {
+      if (!window.localStorage.getItem("consensus-tour-seen")) setTourOpen(true);
+    } catch {
+      // Storage unavailable: the Tour button still works.
+    }
+  }, [isSpectator]);
+  const closeTour = () => {
+    setTourOpen(false);
+    try {
+      window.localStorage.setItem("consensus-tour-seen", "1");
+    } catch {
+      // Ignore: the tour may simply reopen next time.
+    }
   };
 
   // Find self node info
@@ -366,6 +403,18 @@ export function Dashboard({
                 </Button>}
                 {!isSpectator && (
                   <>
+                    <Button variant="outline" onClick={() => setTourOpen(true)}>
+                      <GraduationCap className="h-4 w-4" /> Tour
+                    </Button>
+                    {tourOpen && (
+                      <Tutorial
+                        connection={connection}
+                        onNavigate={openView}
+                        onRefresh={refreshAll}
+                        onToast={setToast}
+                        onClose={closeTour}
+                      />
+                    )}
                     <SpectatorShare connection={connection} onToast={setToast} />
                     {autoStake.available && (
                       <label className="flex items-center gap-2 rounded-md border border-border bg-card px-3 py-2 text-sm">
@@ -432,7 +481,9 @@ export function Dashboard({
                 onTx={setSelectedTx}
               />
             )}
-            {view === "network" && <NetworkPanel peers={peers} selfPk={balance.public_key} />}
+            {view === "network" && (
+              <NetworkPanel peers={peers} selfPk={balance.public_key} packets={packets} />
+            )}
             {view === "validators" && (
               <Validators
                 stakers={stakers}
@@ -443,6 +494,17 @@ export function Dashboard({
                 onRefresh={refreshAll}
                 onToast={setToast}
                 readOnly={isSpectator}
+                lastBlock={
+                  chain.blocks.length > 1
+                    ? {
+                        height: chain.blocks.length,
+                        creator: chain.blocks[chain.blocks.length - 1]!.creator,
+                        slashed:
+                          chain.blocks[chain.blocks.length - 1]!.slash_creator === true ||
+                          chain.blocks[chain.blocks.length - 1]!.is_valid === false,
+                      }
+                    : undefined
+                }
               />
             )}
             {view === "mempool" && (
@@ -1031,7 +1093,45 @@ function TransactionTable({
 
 type Pt = { x: number; y: number };
 
-function NetworkPanel({ peers, selfPk }: { peers: PeersResponse; selfPk: string }) {
+type PacketKind = "tx" | "stake" | "block";
+type Packet = { id: number; kind: PacketKind; fromKey: string };
+
+const PACKET_STYLES: Record<PacketKind, string> = {
+  tx: "h-2.5 w-2.5 rounded-full bg-primary shadow-[0_0_8px_2px] shadow-primary/60",
+  stake: "h-2.5 w-2.5 rounded-full bg-warning shadow-[0_0_8px_2px] shadow-warning/60",
+  block: "h-3.5 w-3.5 rounded-sm bg-success shadow-[0_0_10px_3px] shadow-success/60",
+};
+
+/** One glowing dot travelling between two node positions (fractions of the canvas). */
+function PacketDot({ from, to, kind }: { from: Pt; to: Pt; kind: PacketKind }) {
+  const [moving, setMoving] = useState(false);
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => requestAnimationFrame(() => setMoving(true)));
+    return () => cancelAnimationFrame(frame);
+  }, []);
+  const at = moving ? to : from;
+  return (
+    <div
+      className={`pointer-events-none absolute z-20 -translate-x-1/2 -translate-y-1/2 ${PACKET_STYLES[kind]}`}
+      style={{
+        left: `${at.x * 100}%`,
+        top: `${at.y * 100}%`,
+        opacity: moving ? 0 : 1,
+        transition: "left 1.1s ease-in-out, top 1.1s ease-in-out, opacity 0.35s ease-in 0.85s",
+      }}
+    />
+  );
+}
+
+function NetworkPanel({
+  peers,
+  selfPk,
+  packets,
+}: {
+  peers: PeersResponse;
+  selfPk: string;
+  packets: Packet[];
+}) {
   const peerList = peers.peers;
   const canvasRef = useRef<HTMLDivElement>(null);
   // Positions are fractions (0..1) of the canvas so lines and cards always
@@ -1127,6 +1227,25 @@ function NetworkPanel({ peers, selfPk }: { peers: PeersResponse; selfPk: string 
               </div>
             );
           })}
+          {packets.flatMap((packet) => {
+            const originIndex = peerList.findIndex(
+              (peer) => peer.public_key && normKey(peer.public_key) === normKey(packet.fromKey),
+            );
+            const origin = positions[originIndex];
+            if (!origin) return [];
+            return peerList.flatMap((_, j) => {
+              const target = positions[j];
+              return j === originIndex || !target
+                ? []
+                : [<PacketDot key={`${packet.id}-${j}`} from={origin} to={target} kind={packet.kind} />];
+            });
+          })}
+        </div>
+        <div className="flex flex-wrap items-center gap-x-5 gap-y-1 border-t border-border px-6 py-3 text-xs text-muted-foreground">
+          <span className="flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-full bg-primary" /> Transaction</span>
+          <span className="flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-full bg-warning" /> Stake</span>
+          <span className="flex items-center gap-2"><span className="h-3 w-3 rounded-sm bg-success" /> New block</span>
+          <span>Packets fly from the sender to every other node as they happen.</span>
         </div>
       </section>
 
@@ -1171,6 +1290,7 @@ function Validators({
   onRefresh,
   onToast,
   readOnly,
+  lastBlock,
 }: {
   stakers: StakersResponse;
   balance: BalanceResponse;
@@ -1180,6 +1300,8 @@ function Validators({
   onRefresh: () => void;
   onToast: (s: string) => void;
   readOnly: boolean;
+  /** Newest block: whose turn it was last epoch, and whether it was slashed. */
+  lastBlock?: { height: number; creator: string; slashed: boolean } | undefined;
 }) {
   const [amount, setAmount] = useState("");
   const [loading, setLoading] = useState(false);
@@ -1295,6 +1417,15 @@ function Validators({
             <span>{balance.balance} coins</span>
           </div>
 
+          {Number(amount) > 0 && (
+            <div className="mt-2 flex justify-between text-xs text-muted-foreground">
+              <span>Your chance of being picked</span>
+              <span className="font-medium text-primary">
+                {Math.round((Number(amount) / (total + Number(amount))) * 100)}%
+              </span>
+            </div>
+          )}
+
           {error && (
             <p role="alert" className="mt-3 text-xs text-destructive">
               {error}
@@ -1306,6 +1437,14 @@ function Validators({
           </Button>
         </form>
       </section>}
+      <div className="xl:col-span-2">
+        <ElectionExplainer
+          stakers={stakers}
+          getName={getName}
+          selfPk={balance.public_key}
+          lastBlock={lastBlock}
+        />
+      </div>
     </div>
   );
 }

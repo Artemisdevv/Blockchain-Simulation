@@ -315,6 +315,7 @@ export interface WsEventHandlers {
   onPeerDiscovered?: (peer: any) => void;
   onPeerLeft?: (peer: any) => void;
   onStakeRegistered?: (data: { staker: string; amount: number }) => void;
+  onTxSeen?: (data: { sender: string; receiver: string; amount: number }) => void;
   onNodeSlashed?: (event: NodeSlashedEvent) => void;
   onAttackState?: (event: Record<string, unknown>) => void;
   onOpen?: () => void;
@@ -377,6 +378,9 @@ export function connectEventsWs(
             break;
           case "stake_registered":
             handlers.onStakeRegistered?.(data);
+            break;
+          case "tx_seen":
+            handlers.onTxSeen?.(data);
             break;
           case "node_slashed":
             handlers.onNodeSlashed?.({
