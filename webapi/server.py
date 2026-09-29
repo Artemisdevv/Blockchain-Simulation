@@ -48,6 +48,16 @@ def create_app(peer, loop, token, limiter: RateLimiter, auth_tracker: FailedAuth
 
     @app.before_request
     def require_token():
+        # CORS preflight (OPTIONS) requests never carry the Authorization
+        # header - browsers strip it by design for the preflight probe.
+        # Gating on it here would fail the preflight itself (non-2xx),
+        # which makes the browser block the real request before it's even
+        # sent - completely breaking any cross-origin browser client
+        # regardless of what that client does right. flask-cors answers
+        # OPTIONS itself; auth still applies to the real request that follows.
+        if request.method == "OPTIONS":
+            return
+
         client = request.remote_addr or "unknown"
 
         if auth_tracker.is_blocked(client):
