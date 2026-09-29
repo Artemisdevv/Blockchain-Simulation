@@ -219,10 +219,15 @@ def create_app(peer, loop, token, limiter: RateLimiter, auth_tracker: FailedAuth
     def get_balance():
         if not Chain.instance:
             return jsonify({"public_key": peer.wallet.public_key_pem, "balance": 0})
-        balance = Chain.instance.calc_balance(
+        raw_balance = Chain.instance.calc_balance(
             peer.wallet.public_key_pem, peer.mem_pool, list(peer.current_stakes)
         )
-        return jsonify({"public_key": peer.wallet.public_key_pem, "balance": balance})
+        is_slashed = any(
+            b.slash_creator and b.creator == peer.wallet.public_key_pem
+            for b in Chain.instance.chain
+        )
+        display_balance = raw_balance if is_slashed else max(0, raw_balance)
+        return jsonify({"public_key": peer.wallet.public_key_pem, "balance": display_balance})
 
     @app.post("/transactions")
     def post_transaction():
@@ -265,8 +270,17 @@ def create_app(peer, loop, token, limiter: RateLimiter, auth_tracker: FailedAuth
         status = 200 if result.get("ok") else 400
         return jsonify(result), status
 
+    faucet_limiter = RateLimiter(max_requests=10, window_seconds=3600)
+
     @app.post("/faucet")
     def post_faucet():
+        client_ip = request.remote_addr or "unknown"
+        if not faucet_limiter.allow(client_ip):
+            return jsonify({
+                "ok": False,
+                "error": "Faucet rate limit exceeded: Maximum 10 faucet requests per hour."
+            }), 429
+
         data = request.get_json(force=True, silent=True) or {}
         amount = data.get("amount", 50)
         try:
@@ -281,9 +295,9 @@ def create_app(peer, loop, token, limiter: RateLimiter, auth_tracker: FailedAuth
 
         new_balance = 0
         if Chain.instance:
-            new_balance = Chain.instance.calc_balance(
+            new_balance = max(0, Chain.instance.calc_balance(
                 peer.wallet.public_key_pem, peer.mem_pool, list(peer.current_stakes)
-            )
+            ))
 
         return jsonify({
             "ok": True,
