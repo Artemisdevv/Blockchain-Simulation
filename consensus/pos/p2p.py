@@ -1674,7 +1674,7 @@ class Peer:
 
         return response
 
-    async def start(self, bootstrap_host=None, bootstrap_port=None):
+    async def start(self, bootstrap_host=None, bootstrap_port=None, interactive=True):
         # We start the server
         await websockets.serve(self.handle_connections, self.host, self.port)
         # We await the setting up of the server and the handle connections funciton,
@@ -1690,13 +1690,16 @@ class Peer:
 
 
         reset_task=asyncio.create_task(self.restart_epoch())
-        inp_task=asyncio.create_task(self.user_input_handler())
+        inp_task=asyncio.create_task(self.user_input_handler()) if interactive else None
         consensus_task=asyncio.create_task(self.find_longest_chain())
         disc_task=asyncio.create_task(self.discover_peers())
         sampler_task = asyncio.create_task(self.gossip_peer_sampler())
 
 
-        await inp_task
+        if inp_task:
+            await inp_task
+        else:
+            await asyncio.Future()
 
         reset_task.cancel()
         disc_task.cancel()

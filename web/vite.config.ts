@@ -24,6 +24,15 @@ export default defineConfig({
           changeOrigin: true,
           rewrite: (path) => path.replace(/^\/api\/bob/, ""),
         },
+        "/api/peer-setup": {
+          target: process.env.PEER_MANAGER_API_PROXY_TARGET || "http://localhost:7001",
+          changeOrigin: true,
+          rewrite: (path) => path.replace(/^\/api\/peer-setup/, ""),
+        },
+        "/api/runtime": {
+          target: process.env.PEER_MANAGER_API_PROXY_TARGET || "http://localhost:7001",
+          changeOrigin: true,
+        },
         "/ws/alice": {
           target: process.env.ALICE_WS_PROXY_TARGET || "http://localhost:6002",
           changeOrigin: true,
@@ -35,6 +44,11 @@ export default defineConfig({
           changeOrigin: true,
           ws: true,
           rewrite: (path) => path.replace(/^\/ws\/bob/, ""),
+        },
+        "/ws/runtime": {
+          target: process.env.PEER_MANAGER_WS_PROXY_TARGET || "http://localhost:7002",
+          changeOrigin: true,
+          ws: true,
         },
       },
     },

@@ -9,6 +9,9 @@ The project shows up in Docker Desktop as **blockchain-simulation** (set via
 
 Brings up:
 - `signalling` — room-discovery server, port `7000`
+- `peer-manager` — Compose-local launcher for peers created from the setup screen.
+  It starts `start_peer.py` with `ACTION=room` and keeps up to nine temporary
+  peers in the manager container; restarting the Compose stack clears them.
 - `peer-alice`, `peer-bob` — honest PoS stakers, joined via room `demo`.
   Web API + events websocket published on the host:
   - alice: `http://localhost:6001` (API), `ws://localhost:6002` (events)
@@ -17,7 +20,7 @@ Brings up:
   web API by design (`enable_api` is only true for honest pos peers in
   `start_peer.py`) - see below for how to drive her live.
 
-All four share one Docker network, so this sidesteps the hard "P2P nodes
+All services share one Docker network, so this sidesteps the hard "P2P nodes
 need public IPs to reach each other" problem entirely - containers reach
 each other by service name (`peer-alice`, `signalling`, ...) regardless of
 where the whole stack runs. That means this same compose file works
@@ -25,6 +28,9 @@ unmodified on a single cloud VM too (rent a box, install Docker, `docker
 compose up -d`, done) - no per-node networking work needed, since it's the
 same container-to-container networking either way. Only the demo/API ports
 need to be reachable from wherever the audience is.
+
+The setup screen creates PoS peers in the room entered there. Existing
+Alice/Bob registry connections remain available from the setup screen.
 
 ## Get a peer's auth token
 

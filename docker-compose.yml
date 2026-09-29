@@ -12,10 +12,14 @@ services:
       ALICE_WS_PROXY_TARGET: http://peer-alice:6001
       BOB_API_PROXY_TARGET: http://peer-bob:6000
       BOB_WS_PROXY_TARGET: http://peer-bob:6001
+      PEER_MANAGER_API_PROXY_TARGET: http://peer-manager:7001
+      PEER_MANAGER_WS_PROXY_TARGET: http://peer-manager:7002
     depends_on:
       peer-alice:
         condition: service_healthy
       peer-bob:
+        condition: service_started
+      peer-manager:
         condition: service_started
     healthcheck:
       test:
@@ -52,6 +56,22 @@ services:
       timeout: 3s
       retries: 10
       start_period: 5s
+
+  peer-manager:
+    build:
+      context: .
+      dockerfile: Dockerfile.peer
+    command: ["python", "peer_manager.py"]
+    depends_on:
+      signalling:
+        condition: service_healthy
+    environment:
+      PEER_ADVERTISE_HOST: peer-manager
+      SIGNALLING_HOST: signalling
+      SIGNALLING_PORT: "7000"
+      PEER_MANAGER_BASE_PORT: "5100"
+      PEER_MANAGER_PORT_STEP: "100"
+      PEER_MANAGER_MAX_PEERS: "9"
 
   peer-alice:
     build:

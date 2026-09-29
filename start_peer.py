@@ -80,6 +80,8 @@ def start_peer():
         "ACTION",
         "Enter 'create' to create a network, 'connect' to connect via host:port, or 'room' to join via signalling server using a room ID (default: create): "
     ).strip().lower()
+
+    interactive = os.getenv("INTERACTIVE", "true").strip().lower() not in ("false", "0", "no", "n")
     
     if not consensus:
         consensus = "pow"
@@ -178,7 +180,7 @@ def start_peer():
         asyncio.run(run_peer(
             peer, action, bootstrap_host, bootstrap_port,
             signalling_host, signalling_port, room_id,
-            enable_api, api_port,
+            enable_api, api_port, interactive,
         ))
     except KeyboardInterrupt:
         print("\nShutting Down...")
@@ -186,7 +188,7 @@ def start_peer():
 
 async def run_peer(peer, action, bootstrap_host, bootstrap_port,
                     signalling_host, signalling_port, room_id,
-                    enable_api, api_port):
+                    enable_api, api_port, interactive=True):
     if enable_api:
         from webapi.server import run_api_server
         from webapi.events import run_events_server
@@ -214,7 +216,10 @@ async def run_peer(peer, action, bootstrap_host, bootstrap_port,
         else:
             print(f"\nFirst node in room '{room_id}' - starting a new network\n")
 
-    await peer.start(bootstrap_host, bootstrap_port)
+    if interactive or not enable_api:
+        await peer.start(bootstrap_host, bootstrap_port)
+    else:
+        await peer.start(bootstrap_host, bootstrap_port, interactive=False)
 
 if __name__=="__main__":
     start_peer()

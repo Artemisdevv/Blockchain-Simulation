@@ -4,13 +4,14 @@ import QRCode from "qrcode";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { fetchBalance, type Connection } from "@/lib/api-client";
+import { fetchBalance, startRoomPeer, type Connection } from "@/lib/api-client";
 import { NODE_REGISTRY, resolveNodeByName } from "@/lib/node-registry";
 
 const KNOWN_NAMES = Object.keys(NODE_REGISTRY);
 
 export function ConnectionScreen({ onConnect }: { onConnect: (connection: Connection) => void }) {
   const [name, setName] = useState("");
+  const [roomId, setRoomId] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [showQr, setShowQr] = useState(false);
@@ -65,20 +66,35 @@ export function ConnectionScreen({ onConnect }: { onConnect: (connection: Connec
     }
   };
 
-  const handleJoin = (event: React.FormEvent) => {
+  const handleJoin = async (event: React.FormEvent) => {
     event.preventDefault();
     if (!name.trim()) {
       setError("Enter your node's name (e.g. alice or bob).");
       return;
     }
-    const known = resolveNodeByName(name);
-    if (!known) {
-      setError(
-        `Unknown node name '${name.trim()}'. Ask your teammate what name they used, or use Advanced connection below.`,
-      );
+    if (!roomId.trim()) {
+      setError("Enter a room ID to join.");
       return;
     }
-    connectWith(known);
+    setLoading(true);
+    setError("");
+    try {
+      const peer = await startRoomPeer({
+        name: name.trim(),
+        room_id: roomId.trim(),
+      });
+      const connection: Connection = {
+        url: `/api/runtime/${peer.peer_id}`,
+        token: peer.token,
+        wsUrl: `/ws/runtime/${peer.peer_id}/events`,
+      };
+      await fetchBalance(connection);
+      onConnect(connection);
+    } catch (err: any) {
+      setError(err.message || "Failed to start the peer. Check that the Compose peer manager is running.");
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleAdvancedConnect = (event: React.FormEvent) => {
@@ -185,23 +201,32 @@ export function ConnectionScreen({ onConnect }: { onConnect: (connection: Connec
             <div className="mb-6">
               <h2 className="text-lg font-semibold">Join as your peer</h2>
               <p className="mt-1 text-sm text-muted-foreground">
-                Enter the name you used when starting your node.
+                Start a PoS peer and join a room on the Compose network.
               </p>
             </div>
 
             <div className="space-y-5">
               <div className="space-y-2">
-                <Label htmlFor="peer-name">Name</Label>
+                <Label htmlFor="peer-name">Node Name</Label>
                 <Input
                   id="peer-name"
+                  required
                   value={name}
                   onChange={(e) => setName(e.target.value)}
-                  placeholder="alice"
+                  placeholder="your-name"
                   autoFocus
                 />
-                <p className="text-xs leading-5 text-muted-foreground">
-                  Known nodes: {KNOWN_NAMES.join(", ")}
-                </p>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="room-id">Room ID</Label>
+                <Input
+                  id="room-id"
+                  required
+                  value={roomId}
+                  onChange={(e) => setRoomId(e.target.value)}
+                  placeholder="demo"
+                />
               </div>
 
               {error && (
@@ -209,18 +234,38 @@ export function ConnectionScreen({ onConnect }: { onConnect: (connection: Connec
                   {error}
                 </p>
               )}
-
               <Button className="w-full" size="lg" disabled={loading}>
                 {loading ? (
                   <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Verifying Connection...
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Starting Peer...
                   </>
                 ) : (
                   <>
-                    Open Console <ArrowRight />
+                    Start PoS Peer <ArrowRight />
                   </>
                 )}
               </Button>
+
+              <div className="border-t border-border pt-4">
+                <p className="mb-2 text-xs text-muted-foreground">Connect to an existing demo peer:</p>
+                <div className="flex gap-2">
+                  {KNOWN_NAMES.map((nodeName) => (
+                    <Button
+                      key={nodeName}
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      disabled={loading}
+                      onClick={() => {
+                        const connection = resolveNodeByName(nodeName);
+                        if (connection) void connectWith(connection);
+                      }}
+                    >
+                      {nodeName}
+                    </Button>
+                  ))}
+                </div>
+              </div>
             </div>
 
             <div className="mt-5 border-t border-border pt-4">

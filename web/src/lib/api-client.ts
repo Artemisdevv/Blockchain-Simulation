@@ -15,6 +15,37 @@ export interface Connection {
   wsUrl?: string | undefined;
 }
 
+export interface RoomPeerRequest {
+  name: string;
+  room_id: string;
+}
+
+export interface RoomPeerResponse {
+  peer_id: string;
+  name: string;
+  room_id: string;
+  token: string;
+}
+
+export async function startRoomPeer(config: RoomPeerRequest): Promise<RoomPeerResponse> {
+  const response = await fetch("/api/peer-setup/peers", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(config),
+  });
+  if (!response.ok) {
+    let message = `HTTP ${response.status} ${response.statusText}`;
+    try {
+      const data = await response.json();
+      if (data?.error) message = data.error;
+    } catch {
+      // Keep the HTTP error when the manager response is not JSON.
+    }
+    throw new Error(message);
+  }
+  return response.json() as Promise<RoomPeerResponse>;
+}
+
 export async function apiRequest<T>(
   connection: Connection,
   path: string,
