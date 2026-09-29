@@ -819,7 +819,12 @@ function Explorer({
         <div className="chain-scroll">
           <div className="flex min-w-max items-stretch gap-0 p-6">
             {[...chain.blocks].reverse().map((block, index) => {
-              const isSlashed = slashed?.creator === block.creator;
+              // Chain state is authoritative; the live event only covers the moment
+              // before the next refresh lands.
+              const isSlashed =
+                block.slash_creator === true ||
+                block.is_valid === false ||
+                (slashed?.creator === block.creator && slashed.block_pos === chain.blocks.length - 1 - index);
               return (
                 <div className="flex items-center" key={block.id}>
                   <button
