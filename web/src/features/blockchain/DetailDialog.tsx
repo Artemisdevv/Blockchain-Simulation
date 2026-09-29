@@ -98,10 +98,14 @@ export function BlockDialog({ block, onClose }: { block: Block | null; onClose: 
                 : "None"}
             </Row>
             <Row label="VRF proof">
-              <CopyValue value={block.vrf_proof_b64} />
+              {block.vrf_proof_b64 ? (
+                <CopyValue value={block.vrf_proof_b64} />
+              ) : (
+                "Not applicable (genesis block isn't chosen via VRF)"
+              )}
             </Row>
             <Row label="Seed">
-              <CopyValue value={block.seed} />
+              {block.seed ? <CopyValue value={block.seed} /> : "Not applicable (genesis block)"}
             </Row>
             <Row label="Signature">
               <CopyValue value={block.sign} />
