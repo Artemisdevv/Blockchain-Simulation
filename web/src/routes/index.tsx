@@ -93,7 +93,7 @@ function Index() {
       connection={connection}
       onDisconnect={() => {
         const peerId = peerIdFromConnection(connection);
-        if (peerId) stopRoomPeer(peerId).catch(() => {});
+        if (peerId) stopRoomPeer(peerId, connection.token).catch(() => {});
         window.localStorage.removeItem("consensus-console-connection");
         setConnection(null);
       }}
