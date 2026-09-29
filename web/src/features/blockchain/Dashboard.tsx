@@ -1474,7 +1474,7 @@ function AttackLab({
             const stoppedName = managedPeers.find((item) => item.peer_id === stoppedId)?.name || "Managed node";
             setLoading(true);
             try {
-              await stopRoomPeer(stoppedId);
+              await stopRoomPeer(stoppedId, connection.token);
               setManagedPeers((items) => items.filter((item) => item.peer_id !== stoppedId));
               setSelectedManagedPeer("");
               onToast(`${stoppedName} stopped; signalling and peer connections will update.`);

@@ -66,9 +66,11 @@ export class PeerGoneError extends Error {
   }
 }
 
-export async function stopRoomPeer(peerId: string): Promise<void> {
+/** `token` must belong to a live peer in the same room as `peerId` (usually your own connection's). */
+export async function stopRoomPeer(peerId: string, token: string): Promise<void> {
   const response = await fetch(`/api/peer-setup/peers/${encodeURIComponent(peerId)}`, {
     method: "DELETE",
+    headers: { Authorization: `Bearer ${token}` },
   });
   if (!response.ok) {
     throw new Error(`Failed to stop managed peer (HTTP ${response.status}).`);

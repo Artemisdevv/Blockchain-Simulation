@@ -300,6 +300,14 @@ class PeerManager:
                     run.persist()
             await asyncio.sleep(10)
 
+    def token_in_room(self, token, room_id):
+        with self._lock:
+            return any(
+                peer.room_id == room_id and peer.process.poll() is None
+                and secrets.compare_digest(peer.token, token)
+                for peer in self.peers.values()
+            )
+
     def room_peers(self, room_id):
         with self._lock:
             managed = [peer for peer in self.peers.values() if peer.room_id == room_id and peer.process.poll() is None]
@@ -453,9 +461,17 @@ def create_app(manager=None):
 
     @app.delete("/peers/<peer_id>")
     def delete_peer(peer_id):
-        # No per-peer token: the Attack Lab stops *other* managed nodes by id.
-        if not manager.stop_peer(peer_id):
+        target = manager.get_peer(peer_id)
+        if not target:
             return jsonify({"error": "Peer is no longer running."}), 404
+        # The caller must hold the token of a live peer in the target's room: a node
+        # can disconnect itself, and the Attack Lab can stop a room-mate, but nobody
+        # can kill peers in rooms they are not part of.
+        auth = request.headers.get("Authorization", "")
+        supplied = auth[len("Bearer "):] if auth.startswith("Bearer ") else ""
+        if not supplied or not manager.token_in_room(supplied, target.room_id):
+            return jsonify({"error": "A token for a peer in this room is required."}), 403
+        manager.stop_peer(peer_id)
         return jsonify({"stopped": peer_id}), 200
 
     @app.get("/peers")
@@ -651,7 +667,11 @@ async def run_ws_proxy(manager, websocket):
 
 async def main():
     app, manager = create_app()
-    print(f"Spectator link issuer credential: {manager.issuer_token}", flush=True)
+    # Never log the credential itself: docker logs are readable by anyone with
+    # access to the host. Print where it lives and a fingerprint to identify it.
+    fingerprint = hashlib.sha256(manager.issuer_token.encode()).hexdigest()[:8]
+    print(f"Spectator link issuer credential loaded (sha256 {fingerprint}); read it from "
+          f"{REPORT_DIR / '.spectator_issuer_token'} or set SPECTATOR_ISSUER_TOKEN.", flush=True)
     atexit.register(manager.stop_all)
     manager.event_loop = asyncio.get_running_loop()
     for room_id in {peer.get("room_id") for peer in manager.fixed_peers}:

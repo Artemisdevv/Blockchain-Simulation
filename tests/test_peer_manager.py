@@ -102,11 +102,21 @@ def test_idle_peer_is_reaped(monkeypatch):
     assert peer.peer_id not in manager.peers
 
 
-def test_delete_endpoint_stops_peer_then_404s():
+def test_delete_endpoint_needs_a_token_from_the_same_room():
     manager = _manager()
-    peer = manager.start_peer("a", "room")
+    a = manager.start_peer("a", "room-1")
+    b = manager.start_peer("b", "room-1")
+    outsider = manager.start_peer("c", "room-2")
     client = create_app(manager)[0].test_client()
+    auth = lambda peer: {"Authorization": f"Bearer {peer.token}"}
 
-    assert client.delete(f"/peers/{peer.peer_id}").status_code == 200
-    assert peer.process.returncode == 0
-    assert client.delete(f"/peers/{peer.peer_id}").status_code == 404
+    assert client.delete(f"/peers/{a.peer_id}").status_code == 403
+    assert client.delete(f"/peers/{a.peer_id}", headers={"Authorization": "Bearer wrong"}).status_code == 403
+    assert client.delete(f"/peers/{a.peer_id}", headers=auth(outsider)).status_code == 403
+    assert a.process.returncode is None
+
+    # A room-mate can stop it (Attack Lab), and a node can stop itself (disconnect).
+    assert client.delete(f"/peers/{a.peer_id}", headers=auth(b)).status_code == 200
+    assert a.process.returncode == 0
+    assert client.delete(f"/peers/{b.peer_id}", headers=auth(b)).status_code == 200
+    assert client.delete(f"/peers/{b.peer_id}", headers=auth(b)).status_code == 404
