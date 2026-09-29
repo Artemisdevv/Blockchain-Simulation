@@ -388,6 +388,15 @@ export function Dashboard({
                 onToast={setToast}
               />
             )}
+            {view === "attack_lab" && (
+              <AttackLab
+                connection={connection}
+                slashed={slashed}
+                getName={getName}
+                onToast={setToast}
+                onRefresh={refreshAll}
+              />
+            )}
           </div>
         </main>
       </div>
@@ -424,6 +433,49 @@ const viewDescriptions: Record<View, string> = {
   mempool: "Inspect and submit pending transactions.",
   attack_lab: "Simulate double-sign attacks and test security mechanisms.",
 };
+
+function InvariantRow({
+  title,
+  state,
+  okDetail,
+  failDetail,
+}: {
+  title: string;
+  state: boolean | undefined;
+  okDetail: string;
+  failDetail: string;
+}) {
+  const status = state === undefined ? "checking" : state ? "ok" : "fail";
+  return (
+    <div
+      className={`flex items-center gap-2 rounded p-2.5 ${
+        status === "fail" ? "bg-destructive/10" : "bg-muted/40"
+      }`}
+    >
+      <span
+        className={`font-bold ${
+          status === "fail"
+            ? "text-destructive"
+            : status === "ok"
+              ? "text-success"
+              : "text-muted-foreground"
+        }`}
+      >
+        {status === "fail" ? "✗" : "✓"}
+      </span>
+      <div>
+        <div className="font-medium">{title}</div>
+        <div
+          className={`text-[10px] ${
+            status === "fail" ? "text-destructive" : "text-muted-foreground"
+          }`}
+        >
+          {status === "checking" ? "Checking..." : status === "ok" ? okDetail : failDetail}
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function PanelHeading({
   title,
@@ -475,7 +527,14 @@ function Overview({
   const totalStake = Object.values(stakers.stakers).reduce((a, b) => a + b, 0);
 
   const stats = [
-    [WalletCards, "Balance", `${balance.balance} coins`, "Your wallet balance"],
+    [
+      WalletCards,
+      "Balance",
+      `${balance.balance} coins`,
+      balance.pending_income
+        ? `+${balance.pending_income} pending confirmation`
+        : "Your wallet balance",
+    ],
     [Clock3, "Epoch Ends In", `${countdown}s`, "Next block selection"],
     [Users, "Connected Peers", `${peers.peers.length}`, "Discovered via Signalling"],
     [Blocks, "Chain Height", String(chain.blocks.length), "Verified blocks"],
@@ -514,31 +573,24 @@ function Overview({
           <span className="status status-online text-[11px]">Auto Verified</span>
         </div>
         <div className="grid gap-3 sm:grid-cols-3 text-xs">
-          <div className="flex items-center gap-2 rounded bg-muted/40 p-2.5">
-            <span className="text-success font-bold">✓</span>
-            <div>
-              <div className="font-medium">Chain Consensus</div>
-              <div className="text-[10px] text-muted-foreground">
-                {invariants?.honest_consensus ? "Honest nodes synchronized" : "Checking agreement..."}
-              </div>
-            </div>
-          </div>
-          <div className="flex items-center gap-2 rounded bg-muted/40 p-2.5">
-            <span className="text-success font-bold">✓</span>
-            <div>
-              <div className="font-medium">Supply Conservation</div>
-              <div className="text-[10px] text-muted-foreground">No illegal inflation / overspending</div>
-            </div>
-          </div>
-          <div className="flex items-center gap-2 rounded bg-muted/40 p-2.5">
-            <span className="text-success font-bold">✓</span>
-            <div>
-              <div className="font-medium">Proposer Validation</div>
-              <div className="text-[10px] text-muted-foreground">
-                {invariants?.valid_proposers ? "ECDSA signatures verified" : "Checking signatures..."}
-              </div>
-            </div>
-          </div>
+          <InvariantRow
+            title="Chain Consensus"
+            state={invariants?.honest_consensus}
+            okDetail="Honest nodes synchronized"
+            failDetail="Hash chain broken - a block's prevHash does not match"
+          />
+          <InvariantRow
+            title="Supply Conservation"
+            state={invariants?.supply_conserved}
+            okDetail="No illegal inflation / overspending"
+            failDetail="Total wallet balances don't match coins minted"
+          />
+          <InvariantRow
+            title="Proposer Validation"
+            state={invariants?.valid_proposers}
+            okDetail="ECDSA signatures verified"
+            failDetail="A block's signature does not match its claimed creator"
+          />
         </div>
       </div>
 

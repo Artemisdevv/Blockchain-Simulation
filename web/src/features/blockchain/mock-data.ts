@@ -48,6 +48,7 @@ export interface StakersResponse {
 export interface BalanceResponse {
   public_key: string;
   balance: number;
+  pending_income?: number;
 }
 export interface TransactionResponse {
   ok: true;
