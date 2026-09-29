@@ -41,6 +41,7 @@ import {
   submitStake,
   submitTransaction,
   triggerAttack,
+  PeerGoneError,
   type Connection,
   type InvariantsResponse,
 } from "@/lib/api-client";
@@ -124,9 +125,15 @@ export function Dashboard({
       setCountdown(s.epoch_ends_in_seconds);
       setLastUpdate(new Date());
     } catch (err: any) {
+      if (err instanceof PeerGoneError) {
+        // The peer process is gone (manager restarted, idle-reaped). Don't sit on a
+        // dashboard of zeros: go back to the join screen so the user can rejoin.
+        onDisconnect();
+        return;
+      }
       console.error("Failed to fetch node state:", err);
     }
-  }, [connection]);
+  }, [connection, onDisconnect]);
 
   // Initial load & lightweight background refresh (30s cadence since WebSocket streams live updates)
   useEffect(() => {

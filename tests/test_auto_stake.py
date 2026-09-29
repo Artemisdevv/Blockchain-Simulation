@@ -1,4 +1,5 @@
 import asyncio
+from datetime import datetime, timedelta
 from types import SimpleNamespace
 
 import pytest
@@ -24,7 +25,7 @@ def _run_loop(peer, seconds=0.05):
     asyncio.run(go())
 
 
-def _peer(staked_amt=0, auto_stake=True):
+def _peer(staked_amt=0, auto_stake=True, since_block=3600):
     calls = []
 
     async def stake_coin(amt):
@@ -34,6 +35,7 @@ def _peer(staked_amt=0, auto_stake=True):
     peer = SimpleNamespace(
         staked_amt=staked_amt,
         auto_stake=auto_stake,
+        last_epoch_end_ts=datetime.now() - timedelta(seconds=since_block),
         wallet=SimpleNamespace(public_key_pem="pk"),
         mem_pool=[],
         current_stakes={},
@@ -68,5 +70,12 @@ def test_skips_when_no_balance_or_already_staked():
 def test_does_nothing_when_toggle_off():
     _Chain.balance = 50
     peer, calls = _peer(auto_stake=False)
+    _run_loop(peer)
+    assert calls == []
+
+
+def test_waits_for_last_block_to_propagate_before_staking():
+    _Chain.balance = 50
+    peer, calls = _peer(since_block=0)
     _run_loop(peer)
     assert calls == []

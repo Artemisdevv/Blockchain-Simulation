@@ -3,7 +3,7 @@ import argparse, json, uuid, base64
 import threading, socket, os, subprocess
 from datetime import datetime, timedelta
 from typing import Set, Dict, List, Tuple, Any
-from consensus.pos.blockchain_structures import Transaction, Stake, Block, Wallet, Chain, isvalidChain, weight_of_chain
+from consensus.pos.blockchain_structures import Transaction, Stake, Block, Wallet, Chain, isvalidChain, weight_of_chain, elect_leader
 from shared_blockchain_structures import FAUCET_VERIFYING_KEY
 from ipfs.ipfs import addToIpfs, download_ipfs_file_subprocess
 from smart_contract.contracts_db import SmartContractDatabase
@@ -17,6 +17,7 @@ import ast
 MAX_CONNECTIONS = 8
 MAX_OUTPUT=2**256
 EPOCH_TIME=60
+AUTO_STAKE_SETTLE_SECONDS=5
 GAS_PRICE = 0.001 # coin per gas unit
 BASE_DEPLOY_COST = 5
 CONSENSUS ="pos"
@@ -765,14 +766,8 @@ class Peer:
                 vrf_output_int = int(vrf_output, 16)
                 
                 creator_key = new_block_dict["creator"]
-                if creator_key not in self.current_stakers:
-                    print("\nInvalid Block (creator not in current stakers)\n")
-                    return
-                
-                staked_amt = self.current_stakers[creator_key]
-                total_amt_staked = sum(self.current_stakers.values())
 
-                total_amt_staked_2 = 0
+                block_stakes = {}
                 for stake in newBlock.stakers:
                     vk = VerifyingKey.from_pem(stake.staker)
                     try:
@@ -782,15 +777,22 @@ class Peer:
                         print(f"\nInvalid Block (Stake Signature Error) {e}\n")
                         return
 
-                    total_amt_staked_2 += stake.amt
+                    block_stakes[stake.staker] = block_stakes.get(stake.staker, 0) + stake.amt
 
-                if total_amt_staked < total_amt_staked_2:
-                    print(f"\nSome stakes may have been ignored stakes_in_block 1:{total_amt_staked} 2:{total_amt_staked_2}\n")
+                # The block's (signed) stake list is the epoch's staker set. It must not
+                # drop or alter any stake we already know about, otherwise a creator
+                # could omit rivals to make itself the leader.
+                for pk, amt in self.current_stakers.items():
+                    if block_stakes.get(pk) != amt:
+                        print("\nInvalid Block (stake list omits or alters a known stake)\n")
+                        return
+
+                if block_stakes.get(creator_key) != newBlock.staked_amt:
+                    print("\nInvalid Block (creator stake mismatch)\n")
                     return
 
-                threshold = (staked_amt / total_amt_staked_2) * MAX_OUTPUT
-                if vrf_output_int > threshold:
-                    raise VrfThresholdException("VRF_Output is not less than threshold")
+                if elect_leader(Chain.instance.epoch_seed(), block_stakes) != creator_key:
+                    raise VrfThresholdException("creator is not the elected leader")
                 newBlock.seed = Chain.instance.epoch_seed()
                 newBlock.vrf_output = vrf_output
                 newBlock.vrf_proof = vrf_proof
@@ -1596,6 +1598,12 @@ class Peer:
             try:
                 if not self.auto_stake or self.staked_amt>0:
                     continue
+                # Let the last block reach every peer first. A stake announced
+                # ahead of it is wiped by receivers when the block lands, so
+                # our stake is missing from their staker set and two nodes end
+                # up electing different leaders (forks the chain).
+                if (datetime.now()-self.last_epoch_end_ts).total_seconds()<AUTO_STAKE_SETTLE_SECONDS:
+                    continue
                 balance=Chain.instance.calc_balance(self.wallet.public_key_pem, self.mem_pool, list(self.current_stakes))
                 if balance>0:
                     await self.stake_coin(max(1, balance//2))
@@ -1645,11 +1653,11 @@ class Peer:
             vrf_proof=self.wallet.private_key.sign(seed.encode())
             vrf_output=hashlib.sha256(vrf_proof).hexdigest()
             vrf_output_int=int(vrf_output, 16)
-            total_stake=sum(self.current_stakers.values())
-
-
-            threshold=(self.staked_amt/total_stake)*MAX_OUTPUT
-            if(vrf_output_int>=threshold):
+            # Deterministic election (see elect_leader): every staker computes
+            # the same winner from the same seed and stakes, so exactly one
+            # node mints this epoch's block.
+            leader=elect_leader(seed, self.current_stakers)
+            if(leader!=self.wallet.public_key_pem):
                 print("\nYou've lost\n")
                 self.last_epoch_end_ts=datetime.now()
                 self.staked_amt=0

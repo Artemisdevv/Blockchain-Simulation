@@ -15,6 +15,25 @@ from shared_blockchain_structures import (
 GAS_PRICE = 0.001 # coin per gas unit
 MAX_OUTPUT=2**256
 
+def elect_leader(seed, stakes):
+    """
+        Deterministic stake-weighted leader for one epoch.
+        `stakes` maps staker public key -> staked amount. Every node that sees
+        the same seed and the same stakes computes the same leader, so exactly
+        one block is minted per epoch. (The old per-node VRF lottery let zero
+        or several stakers "win" independently, which forked the chain.)
+    """
+    live={pk:amt for pk,amt in stakes.items() if amt>0}
+    total=sum(live.values())
+    if total<=0:
+        return None
+    pick=int(hashlib.sha256(str(seed).encode()).hexdigest(), 16) % total
+    for pk in sorted(live):
+        if pick<live[pk]:
+            return pk
+        pick-=live[pk]
+    return None
+
 class Stake:
     def __init__(self, staker:str, amt:int, ts=None):
         self.id=str(uuid.uuid4())
@@ -401,7 +420,7 @@ def isvalidChain(blockList:List[Block]):
             print("\nInvalid Seed\n")
             return False
 
-        total_stake=0
+        block_stakes={}
         for stake in currBlock.stakers:
             vk=VerifyingKey.from_pem(stake.staker)
             try:
@@ -411,14 +430,11 @@ def isvalidChain(blockList:List[Block]):
                 return False
             if(stake.amt<=0):
                 return False
-            total_stake+=stake.amt
+            block_stakes[stake.staker]=block_stakes.get(stake.staker, 0)+stake.amt
 
-        vrf_output=hashlib.sha256(currBlock.vrf_proof).hexdigest()
-        vrf_ouput_int=int(vrf_output, 16)
-
-        threshold=(currBlock.staked_amt/total_stake)*MAX_OUTPUT
-        if(vrf_ouput_int>threshold):
-            print("\nFalsified vrf\n")
+        if(elect_leader(currBlock.seed, block_stakes)!=currBlock.creator
+           or block_stakes.get(currBlock.creator)!=currBlock.staked_amt):
+            print("\nCreator is not the elected leader\n")
             return False
 
         mem_pool=[]

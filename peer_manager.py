@@ -90,7 +90,9 @@ class PeerManager:
                 "ROOM_ID": room_id,
                 "MALICIOUS": "n",
                 "STAKER": "y",
-                "AUTO_STAKE": "true",
+                # Off by default: with several auto-stakers a node can still fall a
+                # block behind. Flip it on per node from the dashboard toggle.
+                "AUTO_STAKE": "false",
                 "PYTHONUNBUFFERED": "1",
                 "WEBAPI_HOST": "0.0.0.0",
                 "WEBAPI_TOKEN": token,

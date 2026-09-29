@@ -64,6 +64,16 @@ export async function stopRoomPeer(connection: Connection): Promise<void> {
   }
 }
 
+const PEER_GONE_MESSAGE = "Peer is no longer running.";
+
+/** The peer manager no longer has this peer (restarted, idle-reaped, or stopped). */
+export class PeerGoneError extends Error {
+  constructor() {
+    super(PEER_GONE_MESSAGE);
+    this.name = "PeerGoneError";
+  }
+}
+
 export async function apiRequest<T>(
   connection: Connection,
   path: string,
@@ -87,6 +97,7 @@ export async function apiRequest<T>(
     } catch {
       // Ignore JSON parse error
     }
+    if (res.status === 404 && errorMessage === PEER_GONE_MESSAGE) throw new PeerGoneError();
     throw new Error(errorMessage);
   }
 

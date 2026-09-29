@@ -415,3 +415,26 @@ def test_new_tx_handler_does_not_double_append_when_already_in_own_mempool():
 if __name__ == "__main__":
     import sys
     sys.exit(pytest.main([__file__, "-v"]))
+
+
+# --- Bug 7: independent per-node VRF lotteries forked the chain ---
+
+def test_elect_leader_is_deterministic_and_single():
+    from consensus.pos.blockchain_structures import elect_leader
+
+    stakes = {"pk-a": 25, "pk-b": 28, "pk-c": 3}
+    # Same seed + same stakes => same leader on every node, regardless of dict order.
+    leaders = {elect_leader("seed-1", dict(reversed(list(stakes.items())))) for _ in range(5)}
+    assert leaders == {elect_leader("seed-1", stakes)}
+    assert elect_leader("seed-1", stakes) in stakes
+
+
+def test_elect_leader_is_stake_weighted_and_handles_empty():
+    from consensus.pos.blockchain_structures import elect_leader
+
+    assert elect_leader("s", {}) is None
+    assert elect_leader("s", {"pk-a": 0}) is None
+    wins = {"whale": 0, "minnow": 0}
+    for i in range(400):
+        wins[elect_leader(f"seed-{i}", {"whale": 90, "minnow": 10})] += 1
+    assert wins["whale"] > wins["minnow"] * 4
