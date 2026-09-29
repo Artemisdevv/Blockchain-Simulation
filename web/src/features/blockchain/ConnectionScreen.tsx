@@ -7,12 +7,12 @@ import { Label } from "@/components/ui/label";
 import { fetchBalance, type Connection } from "@/lib/api-client";
 
 const ALICE_CONNECTION: Connection = {
-  url: import.meta.env["VITE_ALICE_API_URL"] || "http://localhost:6001",
+  url: import.meta.env["VITE_ALICE_API_URL"] || "/api/alice",
   token: "demo-token-alice",
   wsUrl: import.meta.env["VITE_ALICE_WS_URL"] || undefined,
 };
 const BOB_CONNECTION: Connection = {
-  url: import.meta.env["VITE_BOB_API_URL"] || "http://localhost:6011",
+  url: import.meta.env["VITE_BOB_API_URL"] || "/api/bob",
   token: "demo-token-bob",
   wsUrl: import.meta.env["VITE_BOB_WS_URL"] || undefined,
 };

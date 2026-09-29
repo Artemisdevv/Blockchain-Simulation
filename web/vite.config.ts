@@ -7,6 +7,37 @@
 import { defineConfig } from "@lovable.dev/vite-tanstack-config";
 
 export default defineConfig({
+  vite: {
+    server: {
+      host: "0.0.0.0",
+      // Cloudflare Quick Tunnels use a fresh trycloudflare.com hostname.
+      allowedHosts: true,
+      proxy: {
+        "/api/alice": {
+          target: "http://localhost:6001",
+          changeOrigin: true,
+          rewrite: (path) => path.replace(/^\/api\/alice/, ""),
+        },
+        "/api/bob": {
+          target: "http://localhost:6011",
+          changeOrigin: true,
+          rewrite: (path) => path.replace(/^\/api\/bob/, ""),
+        },
+        "/ws/alice": {
+          target: "http://localhost:6002",
+          changeOrigin: true,
+          ws: true,
+          rewrite: (path) => path.replace(/^\/ws\/alice/, ""),
+        },
+        "/ws/bob": {
+          target: "http://localhost:6012",
+          changeOrigin: true,
+          ws: true,
+          rewrite: (path) => path.replace(/^\/ws\/bob/, ""),
+        },
+      },
+    },
+  },
   tanstackStart: {
     // Redirect TanStack Start's bundled server entry to src/server.ts (our SSR error wrapper).
     // nitro/vite builds from this
