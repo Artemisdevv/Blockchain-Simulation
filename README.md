@@ -115,27 +115,72 @@ See [Docker Setup](docs/DOCKER.md) for more details.
 The system is composed of a web dashboard, REST API, signalling service, and a network of blockchain peers.
 
 ```mermaid
+%%{init: {
+  "theme": "base",
+  "themeVariables": {
+    "fontFamily": "Inter, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif",
+    "fontSize": "14px",
+    "primaryTextColor": "#1f2937",
+    "lineColor": "#64748b",
+    "clusterBkg": "#f8fafc",
+    "clusterBorder": "#94a3b8"
+  },
+  "flowchart": {
+    "curve": "basis",
+    "nodeSpacing": 55,
+    "rankSpacing": 65
+  }
+}}%%
+
 flowchart TB
-    Dashboard["Web Dashboard<br/>:8080"]
-    API["Web API"]
 
-    subgraph Network["⛓️ Peer Network"]
-        Alice["Alice"]
-        Bob["Bob"]
-        Mallory["Mallory"]
-        Swarm["Peer Swarm"]
+    DASH["<b>WEB DASHBOARD</b><br/>:8080<br/><span style='font-size:12px'>Live network view · Controls · Reports</span>"]
 
-        Alice <--> Bob
-        Alice <--> Mallory
-        Bob <--> Mallory
-        Bob <--> Swarm
+    API["<b>WEB API</b><br/><span style='font-size:12px'>State · Events · Rate Limiting · Reports</span>"]
+
+    subgraph NETWORK["PEER NETWORK"]
+        direction LR
+
+        ALICE["<b>ALICE</b><br/><span style='font-size:12px'>Honest Peer · :6000</span>"]
+
+        BOB["<b>BOB</b><br/><span style='font-size:12px'>Honest Peer · :6000</span>"]
+
+        MALLORY["<b>MALLORY</b><br/><span style='font-size:12px'>Malicious Peer · :6000</span>"]
+
+        SWARM["<b>PEER SWARM</b><br/><span style='font-size:12px'>Additional Peers · :6000</span>"]
+
+        ALICE <--> |P2P| BOB
+        BOB <--> |P2P| MALLORY
+
+        ALICE <--> SWARM
+        BOB <--> SWARM
+        MALLORY <--> SWARM
     end
 
-    Signalling["Signalling Service<br/>:7000"]
+    SIGNAL["<b>SIGNALLING SERVICE</b><br/>:7000<br/><span style='font-size:12px'>Peer discovery · Room management<br/>Does not handle blockchain data</span>"]
 
-    Dashboard -->|"REST / Events"| API
-    API --> Network
-    Signalling -.->|"Discovery"| Network
+    DASH <--> |REST / Events| API
+
+    API <--> |Network state / commands| NETWORK
+
+    SIGNAL -.-> |Peer discovery<br/>register / find peers| NETWORK
+
+
+    classDef dashboard fill:#eef2ff,stroke:#4f46e5,stroke-width:2px,color:#111827
+    classDef api fill:#eff6ff,stroke:#2563eb,stroke-width:2px,color:#111827
+    classDef honest fill:#f0fdf4,stroke:#16a34a,stroke-width:2px,color:#111827
+    classDef malicious fill:#fef2f2,stroke:#dc2626,stroke-width:2px,color:#111827
+    classDef swarm fill:#fffbeb,stroke:#d97706,stroke-width:2px,color:#111827
+    classDef signalling fill:#fdf2f8,stroke:#db2777,stroke-width:2px,color:#111827
+
+    class DASH dashboard
+    class API api
+    class ALICE,BOB honest
+    class MALLORY malicious
+    class SWARM swarm
+    class SIGNAL signalling
+
+    style NETWORK fill:#f8fafc,stroke:#64748b,stroke-width:2px,stroke-dasharray:5 5
 ```
 
 The signalling service is used for **peer discovery**, not for exchanging blockchain data.
