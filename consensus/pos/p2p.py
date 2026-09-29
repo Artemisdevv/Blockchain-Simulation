@@ -64,6 +64,7 @@ class Peer:
         self.host = host
         self.name = name
         self.staker=staker
+        self.auto_faucet_tx_id=None # id of the one-time faucet request auto_stake_loop made
         self.auto_stake=False # toggled via webapi /auto_stake; see auto_stake_loop
 
         self.activate_disk_save = activate_disk_save
@@ -1591,7 +1592,9 @@ class Peer:
                     await self.stake_coin(max(1, balance//2))
                 elif not funded and not any(tx.receiver==self.wallet.public_key_pem for tx in self.mem_pool):
                     funded=True
-                    await self.broadcast_faucet_tx(self.build_faucet_tx(50))
+                    faucet_tx=self.build_faucet_tx(50)
+                    self.auto_faucet_tx_id=faucet_tx.id
+                    await self.broadcast_faucet_tx(faucet_tx)
             except Exception:
                 traceback.print_exc()
 

@@ -304,11 +304,19 @@ def create_app(peer, loop, token, limiter: RateLimiter, auth_tracker: FailedAuth
             if tx.receiver == peer.wallet.public_key_pem
         )
 
+        # The one-time auto-stake faucet request, while it is still unconfirmed,
+        # so the UI can explain why pending shows more than the user requested.
+        auto_faucet_pending = sum(
+            tx.payload for tx in peer.mem_pool
+            if tx.id == getattr(peer, "auto_faucet_tx_id", None)
+        )
+
         spendable_balance = raw_balance if is_slashed else max(0, raw_balance)
         return jsonify({
             "public_key": peer.wallet.public_key_pem,
             "balance": spendable_balance,
             "pending_income": pending_income,
+            "auto_faucet_pending": auto_faucet_pending,
         })
 
     @app.post("/transactions")

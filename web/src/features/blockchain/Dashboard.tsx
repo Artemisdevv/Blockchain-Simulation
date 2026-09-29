@@ -567,7 +567,9 @@ function Overview({
       "Balance",
       `${balance.balance} coins`,
       balance.pending_income
-        ? `+${balance.pending_income} pending confirmation`
+        ? `+${balance.pending_income} pending confirmation${
+            balance.auto_faucet_pending ? ` (incl. ${balance.auto_faucet_pending} auto-faucet)` : ""
+          }`
         : "Your wallet balance",
     ],
     [Clock3, "Epoch Ends In", `${countdown}s`, "Next block selection"],
