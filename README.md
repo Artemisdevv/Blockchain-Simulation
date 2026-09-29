@@ -114,36 +114,28 @@ See [Docker Setup](docs/DOCKER.md) for more details.
 
 The system is composed of a web dashboard, REST API, signalling service, and a network of blockchain peers.
 
-```text
-                         ┌──────────────────┐
-                         │   Web Dashboard  │
-                         │      :8080       │
-                         └────────┬─────────┘
-                                  │
-                             REST / Events
-                                  │
-                         ┌────────▼─────────┐
-                         │      Web API     │
-                         │                  │
-                         └────────┬─────────┘
-                                  │
-                     ┌────────────┴────────────┐
-                     │                         │
-                     │       Peer Network      │
-                     │                         │
-              ┌──────▼──────┐             ┌────▼──────┐
-              │    Alice    │◄─── P2P ───►│    Bob    │
-              └──────┬──────┘             └────┬──────┘
-                     │                         │
-                     │       P2P Network       │
-                     └───────────┬─────────────┘
-                                 │
-                          Peer Discovery
-                                 │
-                         ┌───────▼───────┐
-                         │   Signalling  │
-                         │     :7000     │
-                         └───────────────┘
+```mermaid
+flowchart TB
+    Dashboard["Web Dashboard<br/>:8080"]
+    API["Web API"]
+
+    subgraph Network["⛓️ Peer Network"]
+        Alice["Alice"]
+        Bob["Bob"]
+        Mallory["Mallory"]
+        Swarm["Peer Swarm"]
+
+        Alice <--> Bob
+        Alice <--> Mallory
+        Bob <--> Mallory
+        Bob <--> Swarm
+    end
+
+    Signalling["Signalling Service<br/>:7000"]
+
+    Dashboard -->|"REST / Events"| API
+    API --> Network
+    Signalling -.->|"Discovery"| Network
 ```
 
 The signalling service is used for **peer discovery**, not for exchanging blockchain data.
