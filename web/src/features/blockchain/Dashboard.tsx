@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import {
   Activity,
+  Download,
   AlertTriangle,
   ArrowRight,
   Blocks,
@@ -29,21 +30,33 @@ import { BlockDialog, TransactionDialog } from "./DetailDialog";
 import { CopyValue, formatTime, normKey, shortKey } from "./utils";
 import {
   connectEventsWs,
+  fetchAttackLabState,
   fetchBalance,
   fetchChain,
   fetchInvariants,
+  fetchMetrics,
   fetchMempool,
   fetchPeers,
   fetchStakers,
   fetchAutoStake,
   setAutoStake,
+  downloadRunReport,
+  healPeerPartition,
+  listManagedPeers,
   requestFaucet,
+  setPeerCensorship,
+  setPeerLatency,
+  setPeerPartition,
+  stopRoomPeer,
   submitStake,
   submitTransaction,
   triggerAttack,
   PeerGoneError,
   type Connection,
   type InvariantsResponse,
+  type AttackLabState,
+  type MetricsResponse,
+  type ManagedPeerSummary,
 } from "@/lib/api-client";
 import type {
   Block,
@@ -92,6 +105,7 @@ export function Dashboard({
   });
   const [balance, setBalance] = useState<BalanceResponse>({ public_key: "", balance: 0 });
   const [invariants, setInvariants] = useState<InvariantsResponse | null>(null);
+  const [metrics, setMetrics] = useState<MetricsResponse | null>(null);
   const [slashed, setSlashed] = useState<NodeSlashedEvent | null>(null);
 
   const [countdown, setCountdown] = useState(0);
@@ -102,19 +116,18 @@ export function Dashboard({
   const [wsConnected, setWsConnected] = useState(false);
 
   // Spectator mode detection
-  const isSpectator =
-    typeof window !== "undefined" &&
-    (new URLSearchParams(window.location.search).get("mode") === "spectator" ||
-      connection.token === "spectator");
+  const isSpectator = connection.readOnly === true;
+  const [attackEvent, setAttackEvent] = useState<any>(null);
   const refreshAll = useCallback(async () => {
     try {
-      const [c, p, m, s, b, inv] = await Promise.all([
+      const [c, p, m, s, b, inv, met] = await Promise.all([
         fetchChain(connection),
         fetchPeers(connection),
         fetchMempool(connection),
         fetchStakers(connection),
-        fetchBalance(connection),
+        isSpectator ? Promise.resolve({ public_key: "", balance: 0, pending_income: 0 }) : fetchBalance(connection),
         fetchInvariants(connection).catch(() => null),
+        fetchMetrics(connection).catch(() => null),
       ]);
       setChain(c);
       setPeers(p);
@@ -122,6 +135,7 @@ export function Dashboard({
       setStakers(s);
       setBalance(b);
       if (inv) setInvariants(inv);
+      if (met) setMetrics(met);
       setCountdown(s.epoch_ends_in_seconds);
       setLastUpdate(new Date());
     } catch (err: any) {
@@ -133,7 +147,7 @@ export function Dashboard({
       }
       console.error("Failed to fetch node state:", err);
     }
-  }, [connection, onDisconnect]);
+  }, [connection, isSpectator, onDisconnect]);
 
   // Initial load & lightweight background refresh (30s cadence since WebSocket streams live updates)
   useEffect(() => {
@@ -188,6 +202,7 @@ export function Dashboard({
         setToast(`MALICIOUS ACTIVITY DETECTED: Validator slashed!`);
         refreshAll();
       },
+      onAttackState: (event) => setAttackEvent(event),
     });
 
     return () => unsubscribe();
@@ -230,7 +245,7 @@ export function Dashboard({
 
   // Find self node info
   const selfNodeName =
-    peers.peers.find((p) => p.public_key === balance.public_key)?.name || "node";
+    (isSpectator ? "Room observer" : peers.peers.find((p) => p.public_key === balance.public_key)?.name) || "node";
 
   return (
     <div className="min-h-screen bg-background text-foreground">
@@ -259,12 +274,12 @@ export function Dashboard({
           <div className="ml-auto flex items-center gap-3">
             {isSpectator && (
               <span className="status status-info">
-                <ShieldCheck className="h-3.5 w-3.5 mr-1" /> Spectator Mode
+                <ShieldCheck className="h-3.5 w-3.5 mr-1" /> SPECTATOR / READ ONLY
               </span>
             )}
             <span className={`status ${wsConnected ? "status-online" : "status-neutral"}`}>
               <span className={`status-dot ${wsConnected ? "bg-success" : "bg-muted-foreground"}`} />
-              {wsConnected ? "WS Live" : "REST Sync"}
+              {wsConnected ? "WS Live" : isSpectator ? "REST Sync · reconnecting" : "REST Sync"}
             </span>
             <span className="hidden text-xs text-muted-foreground md:inline">
               Updated{" "}
@@ -301,7 +316,7 @@ export function Dashboard({
               <span className="ml-auto text-[10px] font-semibold uppercase text-primary">Connected</span>
             </div>
             <div className="mt-2 truncate font-mono text-[10px] text-muted-foreground">
-              {connection.url}
+              {isSpectator ? "Read-only room gateway" : connection.url}
             </div>
           </div>
 
@@ -342,7 +357,13 @@ export function Dashboard({
                 <h1 className="mt-3 text-2xl font-semibold sm:text-3xl">{viewTitles[view]}</h1>
                 <p className="mt-1 text-sm text-muted-foreground">{viewDescriptions[view]}</p>
               </div>
-              <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2">
+                {isSpectator && <Button variant="outline" onClick={async () => {
+                    try { await downloadRunReport(connection); }
+                    catch (err: any) { setToast(err.message || "PDF export failed."); }
+                  }}>
+                    <Download className="h-4 w-4" /> Export PDF report
+                </Button>}
                 {!isSpectator && (
                   <>
                     {autoStake.available && (
@@ -397,6 +418,8 @@ export function Dashboard({
                 onView={openView}
                 onBlock={setSelectedBlock}
                 onTx={setSelectedTx}
+                isSpectator={isSpectator}
+                metrics={metrics}
               />
             )}
             {view === "explorer" && (
@@ -418,6 +441,7 @@ export function Dashboard({
                 getName={getName}
                 onRefresh={refreshAll}
                 onToast={setToast}
+                readOnly={isSpectator}
               />
             )}
             {view === "mempool" && (
@@ -428,17 +452,22 @@ export function Dashboard({
                 onRefresh={refreshAll}
                 onTx={setSelectedTx}
                 onToast={setToast}
+                readOnly={isSpectator}
               />
             )}
-            {view === "attack_lab" && (
+            {view === "attack_lab" && (isSpectator ? (
+              <SpectatorAttackPanel connection={connection} event={attackEvent} slashed={slashed} />
+            ) : (
               <AttackLab
                 connection={connection}
+                peers={peers}
+                selfPublicKey={balance.public_key}
                 slashed={slashed}
                 getName={getName}
                 onToast={setToast}
                 onRefresh={refreshAll}
               />
-            )}
+            ))}
           </div>
         </main>
       </div>
@@ -552,6 +581,8 @@ function Overview({
   onView,
   onBlock,
   onTx,
+  isSpectator,
+  metrics,
 }: {
   balance: BalanceResponse;
   chain: ChainResponse;
@@ -565,6 +596,8 @@ function Overview({
   onView: (v: View) => void;
   onBlock: (b: Block) => void;
   onTx: (t: Transaction) => void;
+  isSpectator: boolean;
+  metrics: MetricsResponse | null;
 }) {
   const totalStake = Object.values(stakers.stakers).reduce((a, b) => a + b, 0);
 
@@ -572,8 +605,8 @@ function Overview({
     [
       WalletCards,
       "Balance",
-      `${balance.balance} coins`,
-      balance.pending_income
+      isSpectator ? "—" : `${balance.balance} coins`,
+      isSpectator ? "No peer wallet is attached" : balance.pending_income
         ? `+${balance.pending_income} pending confirmation${
             balance.auto_faucet_pending ? ` (incl. ${balance.auto_faucet_pending} auto-faucet)` : ""
           }`
@@ -604,6 +637,7 @@ function Overview({
           </div>
         ))}
       </div>
+      {metrics && <div className="text-xs text-muted-foreground">Room {metrics.room_id} · {metrics.total_transactions} confirmed transactions · average block time {metrics.avg_block_time_sec}s</div>}
 
       {/* Consensus Invariants Panel */}
       <div className="rounded-lg border border-border bg-card p-4">
@@ -648,14 +682,14 @@ function Overview({
                 Validator <span className="font-mono">{getName(slashed.creator)}</span> attempted double-signing at block index {slashed.block_pos}. Stake slashed to zero!
               </p>
             </div>
-            <Button
+            {!isSpectator && <Button
               variant="outline"
               size="sm"
               className="ml-auto shrink-0 border-current bg-transparent hover:bg-destructive/10"
               onClick={() => onView("validators")}
             >
               Inspect <ChevronRight />
-            </Button>
+            </Button>}
           </div>
         </div>
       )}
@@ -1051,6 +1085,7 @@ function Validators({
   getName,
   onRefresh,
   onToast,
+  readOnly,
 }: {
   stakers: StakersResponse;
   balance: BalanceResponse;
@@ -1059,6 +1094,7 @@ function Validators({
   getName: (pk: string) => string;
   onRefresh: () => void;
   onToast: (s: string) => void;
+  readOnly: boolean;
 }) {
   const [amount, setAmount] = useState("");
   const [loading, setLoading] = useState(false);
@@ -1146,7 +1182,7 @@ function Validators({
         </div>
       </section>
 
-      <section className="panel self-start p-5">
+      {!readOnly && <section className="panel self-start p-5">
         <div className="mb-5">
           <h2 className="text-sm font-semibold">Register Stake</h2>
           <p className="mt-1 text-xs text-muted-foreground">
@@ -1184,7 +1220,7 @@ function Validators({
             <Coins /> {loading ? "Registering..." : "Register Stake"}
           </Button>
         </form>
-      </section>
+      </section>}
     </div>
   );
 }
@@ -1196,6 +1232,7 @@ function Mempool({
   onRefresh,
   onTx,
   onToast,
+  readOnly,
 }: {
   mempool: MempoolResponse;
   connection: Connection;
@@ -1203,6 +1240,7 @@ function Mempool({
   onRefresh: () => void;
   onTx: (t: Transaction) => void;
   onToast: (s: string) => void;
+  readOnly: boolean;
 }) {
   const [receiver, setReceiver] = useState("");
   const [amount, setAmount] = useState("");
@@ -1248,7 +1286,7 @@ function Mempool({
         <TransactionTable transactions={mempool.transactions} getName={getName} onTx={onTx} />
       </section>
 
-      <section className="panel self-start p-5">
+      {!readOnly && <section className="panel self-start p-5">
         <h2 className="text-sm font-semibold">Send Transaction</h2>
         <p className="mt-1 text-xs text-muted-foreground">Broadcast transaction to the P2P network.</p>
 
@@ -1290,25 +1328,78 @@ function Mempool({
             <Send /> {loading ? "Broadcasting..." : "Submit Transaction"}
           </Button>
         </form>
-      </section>
+      </section>}
+    </div>
+  );
+}
+
+function SpectatorAttackPanel({
+  connection,
+  event,
+  slashed,
+}: {
+  connection: Connection;
+  event: any;
+  slashed: NodeSlashedEvent | null;
+}) {
+  const [state, setState] = useState<AttackLabState>({ blocked_peers: [], latency_ms: 0, censored_receivers: [] });
+  useEffect(() => {
+    let active = true;
+    const refresh = () => fetchAttackLabState(connection).then((value) => { if (active) setState(value); }).catch(() => {});
+    refresh();
+    const timer = window.setInterval(refresh, 10000);
+    return () => { active = false; window.clearInterval(timer); };
+  }, [connection]);
+  return (
+    <div className="space-y-4">
+      <div className="panel p-5">
+        <h2 className="text-sm font-semibold">Observed Attack Lab State</h2>
+        <p className="mt-2 text-xs text-muted-foreground">Read-only live state from the selected room peer.</p>
+        <div className="mt-4 grid gap-3 sm:grid-cols-3 text-sm">
+          <div>Partitioned peers: {state.blocked_peers.length}</div>
+          <div>Outbound latency: {state.latency_ms} ms</div>
+          <div>Censorship rules: {state.censored_receivers.length}</div>
+        </div>
+      </div>
+      {event && <div className="panel p-5"><h3 className="text-sm font-semibold">Latest live attack event</h3><p className="mt-2 text-xs">{event.attack || event.type}: {JSON.stringify(event)}</p></div>}
+      {slashed && <div className="alert-danger">Slashing observed for block {slashed.block_pos} (creator {shortKey(slashed.creator)}).</div>}
+      <div className="panel p-5 text-xs text-muted-foreground">Attack activity contains only events observed while this gateway was connected. The run report labels state snapshots separately from event history.</div>
     </div>
   );
 }
 
 function AttackLab({
   connection,
+  peers,
+  selfPublicKey,
   slashed,
   getName,
   onToast,
   onRefresh,
 }: {
   connection: Connection;
+  peers: PeersResponse;
+  selfPublicKey: string;
   slashed: NodeSlashedEvent | null;
   getName: (pk: string) => string;
   onToast: (s: string) => void;
   onRefresh: () => void;
 }) {
   const [loading, setLoading] = useState(false);
+  const [managedPeers, setManagedPeers] = useState<ManagedPeerSummary[]>([]);
+  const [selectedManagedPeer, setSelectedManagedPeer] = useState("");
+  const [selectedPeerKeys, setSelectedPeerKeys] = useState<string[]>([]);
+  const [latencyInput, setLatencyInput] = useState("1500");
+  const [censorReceiver, setCensorReceiver] = useState("");
+  const [attackState, setAttackState] = useState<AttackLabState>({ blocked_peers: [], latency_ms: 0, censored_receivers: [] });
+
+  useEffect(() => {
+    fetchAttackLabState(connection).then(setAttackState).catch(() => {});
+    listManagedPeers().then((items) => {
+      setManagedPeers(items);
+      if (items[0]) setSelectedManagedPeer(items[0].peer_id);
+    }).catch(() => setManagedPeers([]));
+  }, [connection]);
 
   const handleTriggerAttack = async () => {
     setLoading(true);
@@ -1326,6 +1417,23 @@ function AttackLab({
       setLoading(false);
     }
   };
+
+  const applyAction = async (action: () => Promise<unknown>, success: string) => {
+    setLoading(true);
+    try {
+      await action();
+      onToast(success);
+      setAttackState(await fetchAttackLabState(connection));
+      onRefresh();
+    } catch (err: any) {
+      onToast(err.message || "Attack control failed.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const selectedCensorKey = peers.peers.find((peer) => peer.name === censorReceiver)?.public_key || "";
+  const censorshipEnabled = Boolean(selectedCensorKey && attackState.censored_receivers.includes(selectedCensorKey));
 
   return (
     <div className="space-y-6">
@@ -1354,6 +1462,75 @@ function AttackLab({
       </div>
 
       <div className="grid gap-6 sm:grid-cols-2">
+        <div className="panel p-5 space-y-3">
+          <h2 className="text-sm font-semibold">Kill a Managed Node</h2>
+          <p className="text-xs text-muted-foreground">Stops a peer-manager subprocess. Fixed Compose peers cannot be stopped here.</p>
+          <select className="w-full rounded-md border border-border bg-background p-2 text-sm" value={selectedManagedPeer} onChange={(e) => setSelectedManagedPeer(e.target.value)}>
+            {managedPeers.length === 0 && <option value="">No managed peers running</option>}
+            {managedPeers.map((item) => <option key={item.peer_id} value={item.peer_id}>{item.name} · {item.room_id}</option>)}
+          </select>
+          <Button variant="destructive" disabled={loading || !selectedManagedPeer} onClick={async () => {
+            const stoppedId = selectedManagedPeer;
+            const stoppedName = managedPeers.find((item) => item.peer_id === stoppedId)?.name || "Managed node";
+            setLoading(true);
+            try {
+              await stopRoomPeer(stoppedId);
+              setManagedPeers((items) => items.filter((item) => item.peer_id !== stoppedId));
+              setSelectedManagedPeer("");
+              onToast(`${stoppedName} stopped; signalling and peer connections will update.`);
+              onRefresh();
+            } catch (err: any) {
+              onToast(err.message || "Failed to stop managed node.");
+            } finally {
+              setLoading(false);
+            }
+          }}>Stop selected managed node</Button>
+          <div className="text-xs text-muted-foreground">Managed nodes available: {managedPeers.length}</div>
+        </div>
+
+        <div className="panel p-5 space-y-3">
+          <h2 className="text-sm font-semibold">Partition the P2P Network</h2>
+          <p className="text-xs text-muted-foreground">Isolate selected peer identities from this node’s actual P2P links.</p>
+          <div className="max-h-28 space-y-1 overflow-auto">
+            {peers.peers.filter((peer) => peer.public_key !== selfPublicKey).map((peer) => (
+              <label key={peer.public_key} className="flex items-center gap-2 text-xs">
+                <input type="checkbox" checked={selectedPeerKeys.includes(peer.public_key)} onChange={(e) => setSelectedPeerKeys((keys) => e.target.checked ? [...keys, peer.public_key] : keys.filter((key) => key !== peer.public_key))} />
+                {peer.name}
+              </label>
+            ))}
+          </div>
+          <div className="flex gap-2">
+            <Button disabled={loading || selectedPeerKeys.length === 0} onClick={() => applyAction(() => setPeerPartition(connection, selectedPeerKeys), "Partition applied to selected P2P peers.")}>Partition links</Button>
+            <Button variant="outline" disabled={loading || attackState.blocked_peers.length === 0} onClick={() => applyAction(() => healPeerPartition(connection), "Partition healed; peer reconnection started.")}>Heal network</Button>
+          </div>
+          <div className="text-xs text-muted-foreground">Currently isolated identities: {attackState.blocked_peers.length}</div>
+        </div>
+
+        <div className="panel p-5 space-y-3">
+          <h2 className="text-sm font-semibold">Add P2P Latency</h2>
+          <p className="text-xs text-muted-foreground">Delays every outbound P2P broadcast from this node.</p>
+          <div className="flex items-center gap-2"><Input type="number" min="0" max="10000" value={latencyInput} onChange={(e) => setLatencyInput(e.target.value)} /><span className="text-xs text-muted-foreground">ms</span></div>
+          <div className="flex gap-2">
+            <Button disabled={loading} onClick={() => applyAction(() => setPeerLatency(connection, Number(latencyInput)), `P2P broadcast delay set to ${latencyInput} ms.`)}>Apply delay</Button>
+            <Button variant="outline" disabled={loading} onClick={() => { setLatencyInput("0"); void applyAction(() => setPeerLatency(connection, 0), "P2P latency cleared."); }}>Clear</Button>
+          </div>
+          <div className="text-xs text-muted-foreground">Active outbound delay: {attackState.latency_ms} ms</div>
+        </div>
+
+        <div className="panel p-5 space-y-3">
+          <h2 className="text-sm font-semibold">Censor Transactions</h2>
+          <p className="text-xs text-muted-foreground">This node rejects matching transactions from its mempool and P2P intake.</p>
+          <select className="w-full rounded-md border border-border bg-background p-2 text-sm" value={censorReceiver} onChange={(e) => setCensorReceiver(e.target.value)}>
+            <option value="">Select a transaction recipient</option>
+            {peers.peers.filter((peer) => peer.public_key !== selfPublicKey).map((peer) => <option key={peer.public_key} value={peer.name}>{peer.name}</option>)}
+          </select>
+          <Button disabled={loading || !censorReceiver} onClick={() => applyAction(() => setPeerCensorship(connection, censorReceiver, !censorshipEnabled), censorshipEnabled ? `Censorship for ${censorReceiver} disabled.` : `Transactions to ${censorReceiver} are now censored by this node.`)}>
+            {censorshipEnabled ? "Stop censorship" : "Start censorship"}
+          </Button>
+          <div className="text-xs text-muted-foreground">Active recipient rules: {attackState.censored_receivers.length}</div>
+          {attackState.censored_receivers.length > 0 && <div className="text-xs text-destructive">Censoring: {attackState.censored_receivers.map(getName).join(", ")}</div>}
+        </div>
+
         <div className="panel p-5 space-y-3">
           <div className="flex items-center gap-2 text-sm font-semibold">
             <ShieldCheck className="h-4 w-4 text-success" />

@@ -68,6 +68,12 @@ services:
       PEER_MANAGER_BASE_PORT: "5100"
       PEER_MANAGER_PORT_STEP: "100"
       PEER_MANAGER_MAX_PEERS: "9"
+      PEER_MANAGER_ROOM_PEERS: '[{"room_id":"demo","name":"alice","base_url":"http://peer-alice:6000","token":"demo-token-alice"},{"room_id":"demo","name":"bob","base_url":"http://peer-bob:6000","token":"demo-token-bob"}]'
+      SPECTATOR_SIGNING_KEY: ${SPECTATOR_SIGNING_KEY:-}
+      SPECTATOR_ISSUER_TOKEN: ${SPECTATOR_ISSUER_TOKEN:-}
+      RUN_REPORT_DIR: /app/runtime_reports
+    volumes:
+      - peer-manager-reports:/app/runtime_reports
 
   peer-alice:
     # Opt-in demo node: docker compose --profile demo up
@@ -89,8 +95,8 @@ services:
       PEER_PORT: "5000"
       PEER_NAME: alice
       CONSENSUS: pos
-      DISK_LOAD: "n"
-      DISK_SAVE: "n"
+      DISK_LOAD: "y"
+      DISK_SAVE: "y"
       ACTION: room
       SIGNALLING_HOST: signalling
       SIGNALLING_PORT: "7000"
@@ -137,8 +143,8 @@ services:
       PEER_PORT: "5000"
       PEER_NAME: bob
       CONSENSUS: pos
-      DISK_LOAD: "n"
-      DISK_SAVE: "n"
+      DISK_LOAD: "y"
+      DISK_SAVE: "y"
       ACTION: room
       SIGNALLING_HOST: signalling
       SIGNALLING_PORT: "7000"
@@ -173,8 +179,8 @@ services:
       PEER_PORT: "5000"
       PEER_NAME: mallory
       CONSENSUS: pos
-      DISK_LOAD: "n"
-      DISK_SAVE: "n"
+      DISK_LOAD: "y"
+      DISK_SAVE: "y"
       ACTION: room
       SIGNALLING_HOST: signalling
       SIGNALLING_PORT: "7000"
@@ -206,11 +212,14 @@ services:
       PEER_PORT: "5000"
       PEER_NAME: swarm
       CONSENSUS: pos
-      DISK_LOAD: "n"
-      DISK_SAVE: "n"
+      DISK_LOAD: "y"
+      DISK_SAVE: "y"
       ACTION: room
       SIGNALLING_HOST: signalling
       SIGNALLING_PORT: "7000"
       ROOM_ID: demo
       MALICIOUS: "n"
       STAKER: "n"
+
+volumes:
+  peer-manager-reports:

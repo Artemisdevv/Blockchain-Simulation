@@ -4,7 +4,7 @@ import QRCode from "qrcode";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { fetchBalance, startRoomPeer, type Connection } from "@/lib/api-client";
+import { createSpectatorLink, fetchBalance, startRoomPeer, type Connection } from "@/lib/api-client";
 import { NODE_REGISTRY } from "@/lib/node-registry";
 
 const KNOWN_NAMES = Object.keys(NODE_REGISTRY);
@@ -16,6 +16,8 @@ export function ConnectionScreen({ onConnect }: { onConnect: (connection: Connec
   const [error, setError] = useState("");
   const [showQr, setShowQr] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [spectatorShareUrl, setSpectatorShareUrl] = useState("");
+  const [spectatorIssuer, setSpectatorIssuer] = useState("");
   const qrCanvasRef = useRef<HTMLCanvasElement | null>(null);
 
   // Advanced/custom connection, for spectators or non-standard deployments
@@ -35,7 +37,7 @@ export function ConnectionScreen({ onConnect }: { onConnect: (connection: Connec
     shareUrl.searchParams.set("token", advToken.trim());
     if (advWsUrl.trim()) shareUrl.searchParams.set("wsUrl", advWsUrl.trim());
   }
-  const currentShareUrl = shareUrl.toString();
+  const currentShareUrl = spectatorShareUrl || shareUrl.toString();
 
   useEffect(() => {
     if (showQr && qrCanvasRef.current) {
@@ -116,6 +118,24 @@ export function ConnectionScreen({ onConnect }: { onConnect: (connection: Connec
     setTimeout(() => setCopied(false), 2000);
   };
 
+  const toggleSpectatorQr = async () => {
+    if (showQr) {
+      setShowQr(false);
+      return;
+    }
+    setLoading(true);
+    setError("");
+    try {
+      if (!spectatorIssuer.trim()) throw new Error("Enter the spectator link issuer credential from the peer-manager logs or deployment configuration.");
+      setSpectatorShareUrl(await createSpectatorLink(roomId.trim() || "demo", spectatorIssuer.trim()));
+      setShowQr(true);
+    } catch (err: any) {
+      setError(err.message || "Could not create a spectator link for this room.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <main className="min-h-screen bg-background px-5 py-10 sm:px-8 lg:px-12">
       <div className="mx-auto flex min-h-[calc(100vh-5rem)] max-w-6xl flex-col justify-between">
@@ -133,7 +153,8 @@ export function ConnectionScreen({ onConnect }: { onConnect: (connection: Connec
           <Button
             variant="outline"
             size="sm"
-            onClick={() => setShowQr(!showQr)}
+            onClick={() => void toggleSpectatorQr()}
+            disabled={loading}
             className="flex items-center gap-2"
           >
             <QrCode className="h-4 w-4 text-primary" />
@@ -151,6 +172,10 @@ export function ConnectionScreen({ onConnect }: { onConnect: (connection: Connec
               <p className="text-xs leading-relaxed text-muted-foreground">
                 Scan this QR code or copy the link below to open the dashboard live on your mobile device or secondary browser. Automatically connects in Spectator mode!
               </p>
+              <div className="space-y-1">
+                <Label htmlFor="spectator-issuer" className="text-xs">Spectator link issuer credential</Label>
+                <Input id="spectator-issuer" type="password" value={spectatorIssuer} onChange={(e) => setSpectatorIssuer(e.target.value)} placeholder="From peer-manager logs or deployment configuration" />
+              </div>
               <div className="flex items-center gap-2 pt-2">
                 <Input
                   readOnly
@@ -224,7 +249,11 @@ export function ConnectionScreen({ onConnect }: { onConnect: (connection: Connec
                   id="room-id"
                   required
                   value={roomId}
-                  onChange={(e) => setRoomId(e.target.value)}
+                  onChange={(e) => {
+                    setRoomId(e.target.value);
+                    setSpectatorShareUrl("");
+                    setShowQr(false);
+                  }}
                   placeholder="demo"
                 />
               </div>

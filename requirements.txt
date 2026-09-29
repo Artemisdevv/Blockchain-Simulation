@@ -25,3 +25,4 @@ varint==1.0.2
 websockets==15.0.1
 Werkzeug==3.1.9
 python-dotenv==1.2.3
+reportlab==4.4.10

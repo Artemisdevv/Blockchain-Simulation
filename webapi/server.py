@@ -271,6 +271,57 @@ def create_app(peer, loop, token, limiter: RateLimiter, auth_tracker: FailedAuth
         })
         return jsonify({"peers": peers})
 
+    @app.get("/attack-lab/state")
+    def get_attack_lab_state():
+        return jsonify({
+            "blocked_peers": sorted(peer.attack_blocked_peer_keys),
+            "latency_ms": peer.network_latency_ms,
+            "censored_receivers": sorted(peer.censored_receivers),
+        })
+
+    @app.post("/attack-lab/partition")
+    def set_attack_partition():
+        data = request.get_json(force=True, silent=True) or {}
+        keys = data.get("peer_keys")
+        if not isinstance(keys, list) or not all(isinstance(key, str) for key in keys):
+            return jsonify({"ok": False, "error": "peer_keys must be an array of public keys"}), 400
+        known_keys = {public_key for _, public_key in peer.known_peers.values()}
+        selected = set(keys)
+        if not selected or not selected.issubset(known_keys):
+            return jsonify({"ok": False, "error": "Select one or more currently known peers"}), 400
+        run_coro(peer.set_attack_partition(selected))
+        return jsonify({"ok": True, "blocked_peers": sorted(peer.attack_blocked_peer_keys)})
+
+    @app.post("/attack-lab/heal-partition")
+    def heal_attack_partition():
+        run_coro(peer.heal_attack_partition())
+        return jsonify({"ok": True})
+
+    @app.post("/attack-lab/latency")
+    def set_attack_latency():
+        data = request.get_json(force=True, silent=True) or {}
+        try:
+            latency_ms = int(data.get("latency_ms"))
+        except (TypeError, ValueError):
+            return jsonify({"ok": False, "error": "latency_ms must be an integer"}), 400
+        if latency_ms < 0 or latency_ms > 10000:
+            return jsonify({"ok": False, "error": "latency_ms must be between 0 and 10000"}), 400
+        run_coro(peer.set_network_latency(latency_ms))
+        return jsonify({"ok": True, "latency_ms": peer.network_latency_ms})
+
+    @app.post("/attack-lab/censorship")
+    def set_attack_censorship():
+        data = request.get_json(force=True, silent=True) or {}
+        receiver = str(data.get("receiver", "")).strip()
+        enabled = data.get("enabled")
+        if not receiver or not isinstance(enabled, bool):
+            return jsonify({"ok": False, "error": "receiver and boolean enabled are required"}), 400
+        receiver_key = peer.name_to_public_key_dict.get(receiver.lower(), receiver)
+        if not receiver_key.startswith("-----BEGIN PUBLIC KEY-----"):
+            return jsonify({"ok": False, "error": "receiver must be a discovered peer name or public key"}), 400
+        run_coro(peer.set_transaction_censorship(receiver_key, enabled))
+        return jsonify({"ok": True, "receiver": receiver_key, "enabled": enabled})
+
     @app.get("/mempool")
     def get_mempool():
         return jsonify({"transactions": [tx.to_dict() for tx in peer.mem_pool]})
@@ -355,7 +406,10 @@ def create_app(peer, loop, token, limiter: RateLimiter, auth_tracker: FailedAuth
         if amount > balance:
             return jsonify({"ok": False, "error": "insufficient balance"}), 400
 
-        tx = run_coro(peer.create_and_broadcast_tx(receiver_pk, amount))
+        try:
+            tx = run_coro(peer.create_and_broadcast_tx(receiver_pk, amount))
+        except ValueError as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 400
         return jsonify({"ok": True, "transaction_id": tx.id if tx else None})
 
     @app.post("/stakes")

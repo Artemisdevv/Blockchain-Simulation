@@ -2,7 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { ConnectionScreen } from "@/features/blockchain/ConnectionScreen";
 import { Dashboard } from "@/features/blockchain/Dashboard";
-import { stopRoomPeer, type Connection } from "@/lib/api-client";
+import { peerIdFromConnection, stopRoomPeer, type Connection } from "@/lib/api-client";
 import { resolveNodeByName } from "@/lib/node-registry";
 
 export const Route = createFileRoute("/")({
@@ -37,10 +37,20 @@ function Index() {
     const qUrl = params.get("url");
     const qToken = params.get("token");
     const qWsUrl = params.get("wsUrl");
+    const spectatorToken = params.get("spectatorToken");
 
     let autoConn: Connection | null = null;
 
-    if (qNode) {
+    if (params.get("mode") === "spectator" && spectatorToken) {
+      autoConn = {
+        url: `/api/peer-setup/spectator/${encodeURIComponent(spectatorToken)}`,
+        token: spectatorToken,
+        wsUrl: `/ws/runtime/spectator/${encodeURIComponent(spectatorToken)}/events`,
+        readOnly: true,
+      };
+    }
+
+    if (!autoConn && qNode) {
       autoConn = resolveNodeByName(qNode);
     }
     if (!autoConn && qUrl && qToken) {
@@ -82,7 +92,8 @@ function Index() {
     <Dashboard
       connection={connection}
       onDisconnect={() => {
-        void stopRoomPeer(connection);
+        const peerId = peerIdFromConnection(connection);
+        if (peerId) stopRoomPeer(peerId).catch(() => {});
         window.localStorage.removeItem("consensus-console-connection");
         setConnection(null);
       }}

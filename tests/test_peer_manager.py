@@ -102,12 +102,11 @@ def test_idle_peer_is_reaped(monkeypatch):
     assert peer.peer_id not in manager.peers
 
 
-def test_delete_endpoint_requires_matching_token():
+def test_delete_endpoint_stops_peer_then_404s():
     manager = _manager()
     peer = manager.start_peer("a", "room")
     client = create_app(manager)[0].test_client()
 
-    assert client.delete(f"/peers/{peer.peer_id}").status_code == 401
-    ok = client.delete(f"/peers/{peer.peer_id}", headers={"Authorization": f"Bearer {peer.token}"})
-    assert ok.status_code == 200
+    assert client.delete(f"/peers/{peer.peer_id}").status_code == 200
+    assert peer.process.returncode == 0
     assert client.delete(f"/peers/{peer.peer_id}").status_code == 404

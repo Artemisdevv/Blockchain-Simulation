@@ -21,6 +21,7 @@ storage/pow/
 
 # Web API auth tokens (generated per-process, never commit)
 .webapi_token_*
+runtime_reports/
 
 # Local environment config (copy .env.example instead)
 .env
