@@ -1,7 +1,31 @@
 import json, uuid, base64
-from typing import List, Dict 
+from typing import List, Dict
 from datetime import datetime
 from ecdsa import VerifyingKey, SigningKey, SECP256k1
+
+# Well-known dev-faucet keypair. "Genesis" as a sender is otherwise just a
+# magic string anyone could put in a gossiped transaction - minted coins
+# must actually be signed by this key so isValidBlock/isvalidChain/the
+# new_tx gossip handler can verify them like any other sender instead of
+# trusting the string alone (which would let any peer mint unlimited fake
+# coins). This is a hackathon dev-faucet, not a real asset - a keypair
+# checked into source is an appropriate amount of ceremony for the threat
+# model (gates other network peers from forging mints; it doesn't need to
+# resist someone with repo access).
+FAUCET_PRIVATE_KEY_PEM = """-----BEGIN EC PRIVATE KEY-----
+MHQCAQEEIGAvFaFf0oRMz5eJueQpzycBhidJAQ+DL+5Ed7QlnkjCoAcGBSuBBAAKoUQDQgAEZopb
+TrvOvAgo8B2T25LhTixhtvWCh6UE0RhU6KZGpeEelsSzAxD9zFEPUMRNyQCrPPbiu916F9Nm3ihn
+k4uyag==
+-----END EC PRIVATE KEY-----
+"""
+FAUCET_PUBLIC_KEY_PEM = """-----BEGIN PUBLIC KEY-----
+MFYwEAYHKoZIzj0CAQYFK4EEAAoDQgAEZopbTrvOvAgo8B2T25LhTixhtvWCh6UE0RhU6KZGpeEe
+lsSzAxD9zFEPUMRNyQCrPPbiu916F9Nm3ihnk4uyag==
+-----END PUBLIC KEY-----
+"""
+FAUCET_SIGNING_KEY = SigningKey.from_pem(FAUCET_PRIVATE_KEY_PEM)
+FAUCET_VERIFYING_KEY = VerifyingKey.from_pem(FAUCET_PUBLIC_KEY_PEM)
+
 
 class Transaction:
     def __init__(self, payload, sender: str, receiver: str, id=None, ts=None):
@@ -53,7 +77,12 @@ def txs_to_json_digestable_form(transactions: List[Transaction]):
     l=[]
     for i in range(len(transactions)):
         tx_dict=transactions[i].to_dict()
-        if(transactions[i].sender!="Genesis"):
+        # Skip on sign being unset, not on sender=="Genesis": the genesis
+        # block's own initial grant really has no signature, but a
+        # post-genesis faucet mint is now signed by FAUCET_SIGNING_KEY and
+        # that signature must survive serialization for other peers to
+        # verify it.
+        if transactions[i].sign:
             tx_dict["sign"]=base64.b64encode(transactions[i].sign).decode()
         l.append(tx_dict)
     return l

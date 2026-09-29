@@ -9,7 +9,8 @@ from shared_blockchain_structures import (
     Wallet,
     txs_to_json_digestable_form,
     valid_chain_length,
-    transaction_exists_in_block_list
+    transaction_exists_in_block_list,
+    FAUCET_VERIFYING_KEY,
 )
 GAS_PRICE = 0.001 # coin per gas unit
 MAX_OUTPUT=2**256
@@ -206,22 +207,40 @@ class Chain(CommonChain):
             if Chain.instance.transaction_exists_in_chain(transaction):
                 print("Duplicate transaction(s)")
                 return False
-            sign=transaction.sign
-            vk=VerifyingKey.from_pem(transaction.sender)
-            try:
-                vk.verify(sign, str(transaction).encode())
-            except:
-                print("\nFake Transactions\n")
-                return False
-            
+
             amount = 0
             if transaction.receiver == "deploy" or transaction.receiver == "invoke":
                 amount = transaction.payload[-1]
             else:
                 amount = transaction.payload
-            if amount>Chain.instance.calc_balance(publicKey=transaction.sender,pending_transactions=mem_pool,current_stakes=block.stakers) or amount<=0: 
-                # we have to make sure the current transactions are included when checking for balance
-                return False
+
+            if transaction.sender == "Genesis":
+                # "Genesis" is just a string - trusting it alone would let
+                # any peer mint unlimited fake coins. Real mints are signed
+                # by the well-known faucet key (webapi/server.py's
+                # /faucet), so verify against that instead of the sender
+                # field, plus the same amount bound the faucet endpoint
+                # itself enforces.
+                if amount <= 0 or amount > 500:
+                    print("\nInvalid Genesis mint amount\n")
+                    return False
+                try:
+                    FAUCET_VERIFYING_KEY.verify(transaction.sign, str(transaction).encode())
+                except Exception:
+                    print("\nForged Genesis mint (bad faucet signature)\n")
+                    return False
+            else:
+                sign=transaction.sign
+                vk=VerifyingKey.from_pem(transaction.sender)
+                try:
+                    vk.verify(sign, str(transaction).encode())
+                except:
+                    print("\nFake Transactions\n")
+                    return False
+
+                if amount>Chain.instance.calc_balance(publicKey=transaction.sender,pending_transactions=mem_pool,current_stakes=block.stakers) or amount<=0:
+                    # we have to make sure the current transactions are included when checking for balance
+                    return False
             mem_pool.append(transaction)
 
         currStakes=[]
@@ -407,23 +426,37 @@ def isvalidChain(blockList:List[Block]):
             if(transaction_exists_in_block_list(blockList, transaction, i)):
                 print("Duplicate transaction(s)")
                 return False
-            
-            sign=transaction.sign
-            vk_tx=VerifyingKey.from_pem(transaction.sender)
-
-            try:
-                vk_tx.verify(sign, str(transaction).encode())
-            except BadSignatureError:
-                print("\nInvalid signature on transaction\n")
-                return False
 
             amount = 0
             if(transaction.receiver == "deploy" or transaction.receiver == "invoke"):
                 amount = transaction.payload[-1]
             else:
                 amount = transaction.payload
-            if(calc_balance_block_list(blockList, transaction.sender, i, mem_pool, currBlock.stakers) < amount or amount<=0):
-                return False
+
+            if transaction.sender == "Genesis":
+                # See isValidBlock() for why this verifies against the
+                # well-known faucet key instead of trusting the sender
+                # string.
+                if amount <= 0 or amount > 500:
+                    print("\nInvalid Genesis mint amount\n")
+                    return False
+                try:
+                    FAUCET_VERIFYING_KEY.verify(transaction.sign, str(transaction).encode())
+                except Exception:
+                    print("\nForged Genesis mint (bad faucet signature)\n")
+                    return False
+            else:
+                sign=transaction.sign
+                vk_tx=VerifyingKey.from_pem(transaction.sender)
+
+                try:
+                    vk_tx.verify(sign, str(transaction).encode())
+                except BadSignatureError:
+                    print("\nInvalid signature on transaction\n")
+                    return False
+
+                if(calc_balance_block_list(blockList, transaction.sender, i, mem_pool, currBlock.stakers) < amount or amount<=0):
+                    return False
             mem_pool.append(transaction)
         
         # we use a currStakes list because if we just pass currBlock.stakers then the stake 

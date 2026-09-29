@@ -4,6 +4,7 @@ import threading, socket, os, subprocess
 from datetime import datetime, timedelta
 from typing import Set, Dict, List, Tuple, Any
 from consensus.pos.blockchain_structures import Transaction, Stake, Block, Wallet, Chain, isvalidChain, weight_of_chain
+from shared_blockchain_structures import FAUCET_VERIFYING_KEY
 from ipfs.ipfs import addToIpfs, download_ipfs_file_subprocess
 from smart_contract.contracts_db import SmartContractDatabase
 from smart_contract.secure_executor import SecureContractExecutor
@@ -246,7 +247,11 @@ class Peer:
         transactions=[]
         for transaction_dict in block_dict["transactions"]:
             transaction=Transaction(transaction_dict["payload"], transaction_dict["sender"], transaction_dict["receiver"], transaction_dict["id"], transaction_dict["ts"])
-            if(transaction.sender!="Genesis"):
+            # "sign" key is only absent for the genesis block's own unsigned
+            # initial grant (see txs_to_json_digestable_form) - a
+            # post-genesis Genesis-sender (faucet) transaction is signed by
+            # FAUCET_SIGNING_KEY and must be decoded like any other sender.
+            if transaction_dict.get("sign"):
                 transaction.sign=base64.b64decode(transaction_dict["sign"])
             transactions.append(transaction)
         
@@ -516,18 +521,18 @@ class Peer:
             tx_str = msg.get("transaction")
             sender_pem = msg.get("sender_pem")
             sign = msg.get("sign")
-            
-            if not tx_str or not sender_pem or not sign:
+
+            if not tx_str or not sender_pem:
                 return
-            
+
             try:
                 tx = json.loads(tx_str)
             except json.JSONDecodeError:
                 return
-            
+
             if not all(k in tx for k in ['payload', 'sender', 'receiver', 'id', 'ts']):
                 return
-            
+
             amount = 0
             if tx['receiver'] == "deploy" or tx['receiver'] == "invoke":
                 if not isinstance(tx['payload'], list) or len(tx['payload']) == 0:
@@ -535,20 +540,14 @@ class Peer:
                 amount = tx['payload'][-1]
             else:
                 amount = tx['payload']
-            
+
             if amount <= 0:
                 print("\nInvalid Transaction, amount<=0\n")
                 return
-            
+
             transaction = Transaction(tx['payload'], tx['sender'], tx['receiver'], tx['id'], tx['ts'])
             if Chain.instance.transaction_exists_in_chain(transaction):
                 print(f"{self.name} Transaction already exists in chain")
-                return
-            
-            try:
-                sign_bytes = base64.b64decode(sign)
-            except Exception:
-                print("Invalid signature encoding")
                 return
 
             if transaction.receiver == "deploy":
@@ -557,23 +556,52 @@ class Peer:
             if transaction.receiver == "invoke":
                 if not self.valid_invoke_transaction(transaction.payload):
                     return
-                
-            if amount > Chain.instance.calc_balance(transaction.sender, self.mem_pool, list(self.current_stakes)):
-                print("\nAttempt to spend more than one has, Invalid transaction\n")
-                return
 
-            try:
-                public_key = VerifyingKey.from_pem(sender_pem.encode())
-                public_key.verify(
-                    sign_bytes,
-                    tx_str.encode()
-                )
-            except BadSignatureError as e:
-                print("Invalid Signature")
-                return
-            
-            transaction.sign = sign_bytes
-            
+            if transaction.sender == "Genesis":
+                # "Genesis" is just a string - trusting it alone would let
+                # any peer gossip an unlimited fake mint. Real faucet mints
+                # are signed by the well-known faucet key
+                # (webapi/server.py's /faucet), so verify that instead of
+                # the sender field, plus the same amount bound the faucet
+                # endpoint itself enforces.
+                if amount > 500:
+                    print("\nInvalid Genesis mint amount\n")
+                    return
+                if not sign:
+                    print("\nUnsigned Genesis mint rejected\n")
+                    return
+                try:
+                    sign_bytes = base64.b64decode(sign)
+                    FAUCET_VERIFYING_KEY.verify(sign_bytes, tx_str.encode())
+                except Exception:
+                    print("\nForged Genesis mint (bad faucet signature)\n")
+                    return
+                transaction.sign = sign_bytes
+            else:
+                if not sign:
+                    return
+                try:
+                    sign_bytes = base64.b64decode(sign)
+                except Exception:
+                    print("Invalid signature encoding")
+                    return
+
+                if amount > Chain.instance.calc_balance(transaction.sender, self.mem_pool, list(self.current_stakes)):
+                    print("\nAttempt to spend more than one has, Invalid transaction\n")
+                    return
+
+                try:
+                    public_key = VerifyingKey.from_pem(sender_pem.encode())
+                    public_key.verify(
+                        sign_bytes,
+                        tx_str.encode()
+                    )
+                except BadSignatureError as e:
+                    print("Invalid Signature")
+                    return
+
+                transaction.sign = sign_bytes
+
             print("\nValid Transaction")
             print(f"\n{msg['type']}: {msg['transaction']}")
             print("\n")

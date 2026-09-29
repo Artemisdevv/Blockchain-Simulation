@@ -374,9 +374,14 @@ def create_app(peer, loop, token, limiter: RateLimiter, auth_tracker: FailedAuth
             return jsonify({"ok": False, "error": "Amount must be between 1 and 500"}), 400
 
         from consensus.pos.blockchain_structures import Transaction
-        import json
+        from shared_blockchain_structures import FAUCET_SIGNING_KEY
+        import base64, json
 
         faucet_tx = Transaction(amount, "Genesis", peer.wallet.public_key_pem)
+        # "Genesis" isn't a real keypair - sign with the well-known faucet
+        # key so other peers can verify this mint instead of trusting the
+        # sender string alone (see FAUCET_SIGNING_KEY's docstring).
+        faucet_tx.sign = FAUCET_SIGNING_KEY.sign(str(faucet_tx).encode())
 
         async def _add_and_broadcast_faucet():
             async with peer.mem_pool_lock:
@@ -385,7 +390,7 @@ def create_app(peer, loop, token, limiter: RateLimiter, auth_tracker: FailedAuth
                 "type": "new_tx",
                 "id": faucet_tx.id,
                 "transaction": json.dumps(faucet_tx.to_dict()),
-                "sign": "",
+                "sign": base64.b64encode(faucet_tx.sign).decode(),
                 "sender_pem": "Genesis"
             }
             await peer.broadcast_message(pkt)

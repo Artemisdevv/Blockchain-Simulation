@@ -236,6 +236,112 @@ def test_losing_the_vrf_lottery_clears_stake_state():
         p2p_module.Chain.instance = original_chain
 
 
+# --- Bug 6: Genesis-sender (faucet) transactions crashed block/chain validation ---
+
+def _genesis_and_chain_instance(creator):
+    from consensus.pos.blockchain_structures import Chain as PosChain
+    genesis = make_block(None, [])
+    genesis.creator = creator.public_key_pem
+    genesis.sign = creator.private_key.sign(str(genesis).encode())
+    PosChain.instance = PosChain.__new__(PosChain)
+    PosChain.instance.chain = [genesis]
+    return PosChain, genesis
+
+
+def test_isvalidblock_accepts_genesis_mint_transaction():
+    """
+    Before the fix, isValidBlock() unconditionally did
+    VerifyingKey.from_pem(transaction.sender) for every transaction -
+    "Genesis" isn't valid PEM/base64 data, so any block containing a
+    faucet-minted transaction crashed validation with an unhandled
+    binascii.Error instead of being accepted or cleanly rejected.
+
+    Reproduced live: bob's connection-handling coroutine crashed with
+    "binascii.Error: Incorrect padding" the moment alice's chain included
+    a faucet transaction, and the crash cascaded into other peers
+    failing to connect to bob at all.
+    """
+    from shared_blockchain_structures import FAUCET_SIGNING_KEY
+
+    creator = make_wallet()
+    original_instance = None
+    try:
+        PosChain, genesis = _genesis_and_chain_instance(creator)
+        original_instance = PosChain.instance
+
+        mint_tx = Transaction(50, "Genesis", creator.public_key_pem, id="mint-1")
+        mint_tx.sign = FAUCET_SIGNING_KEY.sign(str(mint_tx).encode())
+        block2 = make_block(genesis.hash, [mint_tx])
+        block2.creator = creator.public_key_pem
+        block2.sign = creator.private_key.sign(str(block2).encode())
+
+        assert PosChain.instance.isValidBlock(block2) is True
+    finally:
+        if original_instance is not None:
+            PosChain.instance = original_instance
+
+
+def test_isvalidblock_rejects_oversized_genesis_mint():
+    """
+    A real faucet signature must not become an unbounded minting hole -
+    even correctly signed by the faucet key, an amount over the faucet
+    endpoint's own 500-coin cap must still be rejected.
+    """
+    from shared_blockchain_structures import FAUCET_SIGNING_KEY
+
+    creator = make_wallet()
+    original_instance = None
+    try:
+        PosChain, genesis = _genesis_and_chain_instance(creator)
+        original_instance = PosChain.instance
+
+        fake_mint = Transaction(10 ** 9, "Genesis", creator.public_key_pem, id="mint-2")
+        fake_mint.sign = FAUCET_SIGNING_KEY.sign(str(fake_mint).encode())
+        block2 = make_block(genesis.hash, [fake_mint])
+        block2.creator = creator.public_key_pem
+        block2.sign = creator.private_key.sign(str(block2).encode())
+
+        assert PosChain.instance.isValidBlock(block2) is False
+    finally:
+        if original_instance is not None:
+            PosChain.instance = original_instance
+
+
+def test_isvalidblock_rejects_forged_genesis_mint_without_faucet_signature():
+    """
+    Security fix: "Genesis" as a sender is just a string - without this
+    check, any peer could broadcast a "Genesis"-sender transaction with no
+    real authorization and mint themselves free coins. A valid-range
+    amount (<=500) must still be rejected if it isn't actually signed by
+    the well-known faucet key.
+    """
+    creator = make_wallet()
+    attacker = make_wallet()  # some other real keypair, NOT the faucet's
+    original_instance = None
+    try:
+        PosChain, genesis = _genesis_and_chain_instance(creator)
+        original_instance = PosChain.instance
+
+        forged_mint = Transaction(50, "Genesis", attacker.public_key_pem, id="forged-1")
+        forged_mint.sign = attacker.private_key.sign(str(forged_mint).encode())
+        block2 = make_block(genesis.hash, [forged_mint])
+        block2.creator = creator.public_key_pem
+        block2.sign = creator.private_key.sign(str(block2).encode())
+
+        assert PosChain.instance.isValidBlock(block2) is False
+
+        # Completely unsigned must also be rejected, not just wrongly-signed.
+        unsigned_mint = Transaction(50, "Genesis", attacker.public_key_pem, id="forged-2")
+        block3 = make_block(genesis.hash, [unsigned_mint])
+        block3.creator = creator.public_key_pem
+        block3.sign = creator.private_key.sign(str(block3).encode())
+
+        assert PosChain.instance.isValidBlock(block3) is False
+    finally:
+        if original_instance is not None:
+            PosChain.instance = original_instance
+
+
 if __name__ == "__main__":
     import sys
     sys.exit(pytest.main([__file__, "-v"]))

@@ -4,6 +4,7 @@ import threading, socket, os, subprocess
 from datetime import datetime, timedelta
 from typing import Set, Dict, List, Tuple, Any
 from consensus.pos.blockchain_structures import Transaction, Stake, Block, Wallet, Chain, isvalidChain, weight_of_chain
+from shared_blockchain_structures import FAUCET_VERIFYING_KEY
 from ipfs.ipfs import addToIpfs, download_ipfs_file_subprocess
 from smart_contract.contracts_db import SmartContractDatabase
 from smart_contract.secure_executor import SecureContractExecutor
@@ -243,7 +244,12 @@ class Peer:
         transactions=[]
         for transaction_dict in block_dict["transactions"]:
             transaction=Transaction(transaction_dict["payload"], transaction_dict["sender"], transaction_dict["receiver"], transaction_dict["id"], transaction_dict["ts"])
-            if(transaction.sender!="Genesis"):
+            # "sign" key is only absent for the genesis block's own unsigned
+            # initial grant - a post-genesis Genesis-sender (faucet)
+            # transaction is signed by FAUCET_SIGNING_KEY and must be
+            # decoded like any other sender (see p2p.py's Peer for the
+            # same fix - this is a separate duplicated Peer implementation).
+            if transaction_dict.get("sign"):
                 transaction.sign=base64.b64decode(transaction_dict["sign"])
             transactions.append(transaction)
         
@@ -489,9 +495,6 @@ class Peer:
             if Chain.instance.transaction_exists_in_chain(transaction):
                 print(f"{self.name} Transaction already exists in chain")
                 return
-            
-            sign_bytes=base64.b64decode(msg["sign"])
-            #b64decode turns bytes into a string
 
             if transaction.receiver == "deploy":
                 if not self.valid_deploy_transaction(transaction.payload):
@@ -499,23 +502,44 @@ class Peer:
             if transaction.receiver == "invoke":
                 if not self.valid_invoke_transaction(transaction.payload):
                     return
-                
-            if(amount > Chain.instance.calc_balance(transaction.sender, self.mem_pool, list(self.current_stakes))):
-                print("\nAttempt to spend more than one has, Invalid transaction\n")
-                return
 
-            try:
-                public_key=VerifyingKey.from_pem(msg['sender_pem'].encode())
-                public_key.verify(
-                    sign_bytes,
-                    tx_str.encode()
-                )
-            except BadSignatureError as e:
-                print("Invalid Signature")
-                return
-            
-            transaction.sign=sign_bytes
-            
+            if transaction.sender == "Genesis":
+                # "Genesis" isn't a real keypair - VerifyingKey.from_pem
+                # would crash on it. Faucet mints are signed by the
+                # well-known faucet key instead (see p2p.py's Peer for the
+                # matching fix - this is a separate duplicated Peer
+                # implementation), verify against that plus the faucet's
+                # own 500-coin cap.
+                if amount > 500 or not msg.get("sign"):
+                    print("\nInvalid Genesis mint\n")
+                    return
+                try:
+                    sign_bytes=base64.b64decode(msg["sign"])
+                    FAUCET_VERIFYING_KEY.verify(sign_bytes, tx_str.encode())
+                except Exception:
+                    print("\nForged Genesis mint (bad faucet signature)\n")
+                    return
+                transaction.sign=sign_bytes
+            else:
+                sign_bytes=base64.b64decode(msg["sign"])
+                #b64decode turns bytes into a string
+
+                if(amount > Chain.instance.calc_balance(transaction.sender, self.mem_pool, list(self.current_stakes))):
+                    print("\nAttempt to spend more than one has, Invalid transaction\n")
+                    return
+
+                try:
+                    public_key=VerifyingKey.from_pem(msg['sender_pem'].encode())
+                    public_key.verify(
+                        sign_bytes,
+                        tx_str.encode()
+                    )
+                except BadSignatureError as e:
+                    print("Invalid Signature")
+                    return
+
+                transaction.sign=sign_bytes
+
             print("\nValid Transaction")
             print(f"\n{msg['type']}: {msg['transaction']}")
             print("\n")
