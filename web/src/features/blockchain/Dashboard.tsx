@@ -869,33 +869,77 @@ function TransactionTable({
 function NetworkPanel({ peers, selfPk }: { peers: PeersResponse; selfPk: string }) {
   const peerList = peers.peers;
 
+  // The signalling server's whole purpose is peers connecting directly to
+  // each other, forming a mesh - so the honest topology for any known peer
+  // list is a complete graph (every peer <-> every other peer), not
+  // something we need a separate connection-pair endpoint to discover.
+  const size = 440;
+  const center = size / 2;
+  const radius = size / 2 - 70;
+  const positions = peerList.map((_, i) => {
+    const angle = (2 * Math.PI * i) / Math.max(peerList.length, 1) - Math.PI / 2;
+    return {
+      x: center + radius * Math.cos(angle),
+      y: center + radius * Math.sin(angle),
+    };
+  });
+  const edges: Array<{ key: string; from: { x: number; y: number }; to: { x: number; y: number } }> = [];
+  for (let i = 0; i < positions.length; i++) {
+    for (let j = i + 1; j < positions.length; j++) {
+      const from = positions[i];
+      const to = positions[j];
+      if (from && to) edges.push({ key: `${i}-${j}`, from, to });
+    }
+  }
+
   return (
     <div className="grid gap-6 xl:grid-cols-[1.1fr_1fr]">
       <section className="panel overflow-hidden">
-        <PanelHeading title="Peer Mesh Topology" detail="Live P2P connections discovered" />
-        <div className="relative h-[420px] overflow-hidden bg-grid p-6">
-          <div className="grid h-full grid-cols-2 gap-4 sm:grid-cols-3">
-            {peerList.map((peer) => {
-              const isSelf = peer.public_key === selfPk;
-              return (
-                <div
-                  key={peer.name + peer.host}
-                  className={`flex flex-col items-center justify-center rounded-lg border p-4 text-center transition-all ${
-                    isSelf
-                      ? "border-primary bg-primary/10 font-semibold"
-                      : "border-border bg-card hover:border-primary/50"
-                  }`}
-                >
-                  <Server className={`h-8 w-8 ${isSelf ? "text-primary" : "text-muted-foreground"}`} />
-                  <div className="mt-2 text-sm font-medium">{peer.name}</div>
-                  <div className="font-mono text-[11px] text-muted-foreground">
-                    {peer.host}:{peer.port}
-                  </div>
-                  {isSelf && <span className="mt-2 text-[10px] uppercase text-primary font-bold">You</span>}
+        <PanelHeading
+          title="Peer Mesh Topology"
+          detail={`Full mesh - every peer connects directly to every other peer (${edges.length} link${edges.length === 1 ? "" : "s"})`}
+        />
+        <div className="relative h-[440px] overflow-hidden bg-grid">
+          <svg
+            viewBox={`0 0 ${size} ${size}`}
+            className="absolute inset-0 h-full w-full"
+            preserveAspectRatio="xMidYMid meet"
+          >
+            {edges.map(({ key, from, to }) => (
+              <line
+                key={key}
+                x1={from.x}
+                y1={from.y}
+                x2={to.x}
+                y2={to.y}
+                className="stroke-border"
+                strokeWidth={1.5}
+              />
+            ))}
+          </svg>
+          {peerList.map((peer, i) => {
+            const isSelf = peer.public_key === selfPk;
+            const pos = positions[i];
+            if (!pos) return null;
+            return (
+              <div
+                key={peer.name + peer.host}
+                className={`absolute flex w-28 -translate-x-1/2 -translate-y-1/2 flex-col items-center justify-center rounded-lg border p-3 text-center shadow-sm transition-all ${
+                  isSelf
+                    ? "border-primary bg-primary/10 font-semibold"
+                    : "border-border bg-card hover:border-primary/50"
+                }`}
+                style={{ left: `${(pos.x / size) * 100}%`, top: `${(pos.y / size) * 100}%` }}
+              >
+                <Server className={`h-6 w-6 ${isSelf ? "text-primary" : "text-muted-foreground"}`} />
+                <div className="mt-1.5 text-xs font-medium">{peer.name}</div>
+                <div className="font-mono text-[10px] text-muted-foreground">
+                  {peer.host}:{peer.port}
                 </div>
-              );
-            })}
-          </div>
+                {isSelf && <span className="mt-1 text-[9px] uppercase text-primary font-bold">You</span>}
+              </div>
+            );
+          })}
         </div>
       </section>
 
