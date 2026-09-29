@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { Check, Copy, Eye, Loader2 } from "lucide-react";
 import QRCode from "qrcode";
 import { Button } from "@/components/ui/button";
@@ -28,22 +28,16 @@ export function SpectatorShare({
   const [loading, setLoading] = useState(false);
   const [url, setUrl] = useState("");
   const [copied, setCopied] = useState(false);
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
-
-  useEffect(() => {
-    if (open && url && canvasRef.current) {
-      QRCode.toCanvas(canvasRef.current, url, {
-        width: 180,
-        margin: 2,
-        color: { dark: "#0f172a", light: "#ffffff" },
-      }).catch((err) => console.error("Error generating QR:", err));
-    }
-  }, [open, url]);
+  const [qr, setQr] = useState("");
 
   const share = async () => {
     setLoading(true);
     try {
-      setUrl(await createSpectatorLink(connection.token));
+      const link = await createSpectatorLink(connection.token);
+      // Rendered up front as an image: the dialog content mounts after `open`, so a
+      // canvas ref is not available yet when we would draw into it.
+      setQr(await QRCode.toDataURL(link, { width: 180, margin: 2, color: { dark: "#0f172a", light: "#ffffff" } }));
+      setUrl(link);
       setCopied(false);
       setOpen(true);
     } catch (err: any) {
@@ -74,12 +68,10 @@ export function SpectatorShare({
               send transactions or change anything.
             </DialogDescription>
           </DialogHeader>
-          <div className="flex flex-col items-center gap-4 sm:flex-row">
-            <div className="rounded-lg bg-white p-2 shadow-inner">
-              <canvas ref={canvasRef} />
-            </div>
-            <div className="flex w-full min-w-0 items-center gap-2">
-              <Input readOnly value={url} className="bg-muted font-mono text-xs text-muted-foreground" />
+          <div className="flex flex-col items-center gap-4">
+            {qr && <img src={qr} alt="Spectator link QR code" width={180} height={180} className="rounded-lg bg-white" />}
+            <div className="flex w-full items-center gap-2">
+              <Input readOnly value={url} className="min-w-0 flex-1 bg-muted font-mono text-xs text-muted-foreground" onFocus={(e) => e.currentTarget.select()} />
               <Button variant="secondary" size="sm" onClick={copy} className="shrink-0">
                 {copied ? <Check className="h-4 w-4 text-success" /> : <Copy className="h-4 w-4" />}
                 {copied ? "Copied" : "Copy"}
