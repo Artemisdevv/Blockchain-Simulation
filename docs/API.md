@@ -110,6 +110,33 @@ Stake an amount for the current epoch (only valid on staker nodes).
 { "ok": false, "error": "..." }
 ```
 
+### `GET /invariants`
+Consensus sanity and safety invariants.
+```json
+{
+  "honest_consensus": true,
+  "supply_conserved": true,
+  "valid_proposers": true,
+  "total_blocks": 4,
+  "mempool_count": 0,
+  "peer_count": 3
+}
+```
+
+### `POST /malicious/trigger`
+Triggers a simulated malicious attack (e.g. double-signing or invalid block proposal) on demand without requiring `docker attach` or CLI menu interaction.
+```json
+// request
+{ "attack_type": "double_sign" }
+
+// response (success)
+{
+  "ok": true,
+  "attack": "double_sign",
+  "message": "Malicious double-sign attack triggered. Slashing evidence broadcast to network."
+}
+```
+
 ## WebSocket: `/events` — implemented
 
 Runs on a **separate port**: `api_port + 1` (e.g. REST on 6000 -> events on
