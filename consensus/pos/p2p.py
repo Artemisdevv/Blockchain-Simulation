@@ -774,7 +774,7 @@ class Peer:
                     self.deploy_contract(transaction)
 
             async with self.mem_pool_lock:
-                for transaction in self.mem_pool:
+                for transaction in list(self.mem_pool):
                     if newBlock.transaction_exists_in_block(transaction):
                         self.mem_pool.remove(transaction)
             
@@ -918,7 +918,7 @@ class Peer:
                     print("\nCurrent Chain heavier than received chain\n")
 
             async with self.mem_pool_lock:
-                for transaction in self.mem_pool:
+                for transaction in list(self.mem_pool):
                     if Chain.instance.transaction_exists_in_chain(transaction):
                         self.mem_pool.remove(transaction)
             
@@ -1589,7 +1589,7 @@ class Peer:
         self.last_epoch_end_ts=datetime.now()
 
         async with self.mem_pool_lock:
-            for transaction in self.mem_pool:
+            for transaction in list(self.mem_pool):
                 if newBlock.transaction_exists_in_block(transaction):
                     self.mem_pool.remove(transaction)
 
