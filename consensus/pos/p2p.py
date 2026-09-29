@@ -1506,7 +1506,8 @@ class Peer:
                 self.current_stakes.clear()
                 time_since = timedelta(seconds=0)
             else:
-                return {"ok": False, "error": f"stake registration period closed, time till next epoch: {EPOCH_TIME-time_since.seconds}"}
+                time_till_reset = int(EPOCH_TIME*7/6 - time_since.total_seconds())
+                return {"ok": False, "error": f"stake registration period closed, time till next epoch: {time_till_reset}"}
 
         try:
             amt=int(amt)

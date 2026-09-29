@@ -1100,7 +1100,8 @@ class Peer:
                         self.current_stakes.clear()
 
                     else:
-                        print(F"\nStake registration period closed, try again in the next epoch, time till next epoch : {EPOCH_TIME-time_since.seconds}\n")
+                        time_till_reset = int(EPOCH_TIME*7/6 - time_since.total_seconds())
+                        print(F"\nStake registration period closed, try again in the next epoch, time till next epoch : {time_till_reset}\n")
                         continue
 
                 amt= await asyncio._get_running_loop().run_in_executor(

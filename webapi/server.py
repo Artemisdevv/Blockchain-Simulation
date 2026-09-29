@@ -327,7 +327,16 @@ def create_app(peer, loop, token, limiter: RateLimiter, auth_tracker: FailedAuth
         if amount <= 0:
             return jsonify({"ok": False, "error": "amount must be positive"}), 400
 
-        receiver_pk = peer.name_to_public_key_dict.get(str(receiver).lower().strip(), receiver)
+        receiver_key = str(receiver).strip()
+        receiver_pk = peer.name_to_public_key_dict.get(receiver_key.lower())
+        if receiver_pk is None:
+            if receiver_key.startswith("-----BEGIN"):
+                receiver_pk = receiver_key
+            else:
+                return jsonify({
+                    "ok": False,
+                    "error": f"unknown peer '{receiver_key}' - not discovered yet, ask them to double check their node name",
+                }), 400
 
         if not Chain.instance:
             return jsonify({"ok": False, "error": "chain not initialized yet"}), 409

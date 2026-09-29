@@ -3,17 +3,7 @@ import { useEffect, useState } from "react";
 import { ConnectionScreen } from "@/features/blockchain/ConnectionScreen";
 import { Dashboard } from "@/features/blockchain/Dashboard";
 import type { Connection } from "@/lib/api-client";
-
-const aliceConnection: Connection = {
-  url: import.meta.env["VITE_ALICE_API_URL"] || "/api/alice",
-  token: "demo-token-alice",
-  wsUrl: import.meta.env["VITE_ALICE_WS_URL"] || undefined,
-};
-const bobConnection: Connection = {
-  url: import.meta.env["VITE_BOB_API_URL"] || "/api/bob",
-  token: "demo-token-bob",
-  wsUrl: import.meta.env["VITE_BOB_WS_URL"] || undefined,
-};
+import { resolveNodeByName } from "@/lib/node-registry";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -50,11 +40,10 @@ function Index() {
 
     let autoConn: Connection | null = null;
 
-    if (qNode === "alice") {
-      autoConn = aliceConnection;
-    } else if (qNode === "bob") {
-      autoConn = bobConnection;
-    } else if (qUrl && qToken) {
+    if (qNode) {
+      autoConn = resolveNodeByName(qNode);
+    }
+    if (!autoConn && qUrl && qToken) {
       autoConn = { url: qUrl, token: qToken, ...(qWsUrl ? { wsUrl: qWsUrl } : {}) };
     }
 

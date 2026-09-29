@@ -170,7 +170,7 @@ export function connectEventsWs(
       url.protocol = "ws:";
     }
     if (!connection.wsUrl) {
-      const proxyRoute = url.pathname.match(/^\/api\/(alice|bob)(?:\/|$)/);
+      const proxyRoute = url.pathname.match(/^\/api\/([^/]+)(?:\/|$)/);
       if (proxyRoute) {
         url.pathname = `/ws/${proxyRoute[1]}/events`;
       } else {

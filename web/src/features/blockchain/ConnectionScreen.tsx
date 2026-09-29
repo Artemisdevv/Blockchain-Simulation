@@ -1,39 +1,41 @@
 import { useState, useEffect, useRef } from "react";
-import { ArrowRight, CircleCheck, Database, Loader2, LockKeyhole, Network, QrCode, Server, Zap, Copy, Check } from "lucide-react";
+import { ArrowRight, CircleCheck, Database, Loader2, LockKeyhole, Network, QrCode, Settings2, Copy, Check } from "lucide-react";
 import QRCode from "qrcode";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { fetchBalance, type Connection } from "@/lib/api-client";
+import { NODE_REGISTRY, resolveNodeByName } from "@/lib/node-registry";
 
-const ALICE_CONNECTION: Connection = {
-  url: import.meta.env["VITE_ALICE_API_URL"] || "/api/alice",
-  token: "demo-token-alice",
-  wsUrl: import.meta.env["VITE_ALICE_WS_URL"] || undefined,
-};
-const BOB_CONNECTION: Connection = {
-  url: import.meta.env["VITE_BOB_API_URL"] || "/api/bob",
-  token: "demo-token-bob",
-  wsUrl: import.meta.env["VITE_BOB_WS_URL"] || undefined,
-};
+const KNOWN_NAMES = Object.keys(NODE_REGISTRY);
 
 export function ConnectionScreen({ onConnect }: { onConnect: (connection: Connection) => void }) {
-  const [url, setUrl] = useState(ALICE_CONNECTION.url);
-  const [token, setToken] = useState(ALICE_CONNECTION.token);
-  const [wsUrl, setWsUrl] = useState(ALICE_CONNECTION.wsUrl ?? "");
+  const [name, setName] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [showQr, setShowQr] = useState(false);
   const [copied, setCopied] = useState(false);
   const qrCanvasRef = useRef<HTMLCanvasElement | null>(null);
 
+  // Advanced/custom connection, for spectators or non-standard deployments
+  // that aren't in NODE_REGISTRY. Hidden by default - the primary flow only
+  // asks for a name, mirroring start_peer.py's "Enter Name" prompt.
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [advUrl, setAdvUrl] = useState("");
+  const [advToken, setAdvToken] = useState("");
+  const [advWsUrl, setAdvWsUrl] = useState("");
+
+  const trimmedName = name.trim().toLowerCase();
   const shareUrl = new URL(window.location.origin);
-  shareUrl.searchParams.set("url", url);
-  shareUrl.searchParams.set("token", token);
-  if (wsUrl.trim()) shareUrl.searchParams.set("wsUrl", wsUrl.trim());
+  if (KNOWN_NAMES.includes(trimmedName)) {
+    shareUrl.searchParams.set("node", trimmedName);
+  } else if (advUrl.trim() && advToken.trim()) {
+    shareUrl.searchParams.set("url", advUrl.trim());
+    shareUrl.searchParams.set("token", advToken.trim());
+    if (advWsUrl.trim()) shareUrl.searchParams.set("wsUrl", advWsUrl.trim());
+  }
   const currentShareUrl = shareUrl.toString();
 
-  // Generate QR Code when modal is opened or URL/Token changes
   useEffect(() => {
     if (showQr && qrCanvasRef.current) {
       QRCode.toCanvas(qrCanvasRef.current, currentShareUrl, {
@@ -47,22 +49,10 @@ export function ConnectionScreen({ onConnect }: { onConnect: (connection: Connec
     }
   }, [showQr, currentShareUrl]);
 
-  const handleConnect = async (targetUrl: string, targetToken: string, targetWsUrl?: string) => {
-    if (!targetUrl.trim() || !targetToken.trim()) {
-      setError("Enter both the node API URL and Bearer token.");
-      return;
-    }
-
+  const connectWith = async (conn: Connection) => {
     setLoading(true);
     setError("");
-
     try {
-      const customWsUrl = targetWsUrl?.trim();
-      const conn: Connection = {
-        url: targetUrl.trim(),
-        token: targetToken.trim(),
-        ...(customWsUrl ? { wsUrl: customWsUrl } : {}),
-      };
       await fetchBalance(conn);
       onConnect(conn);
     } catch (err: any) {
@@ -73,6 +63,35 @@ export function ConnectionScreen({ onConnect }: { onConnect: (connection: Connec
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleJoin = (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!name.trim()) {
+      setError("Enter your node's name (e.g. alice or bob).");
+      return;
+    }
+    const known = resolveNodeByName(name);
+    if (!known) {
+      setError(
+        `Unknown node name '${name.trim()}'. Ask your teammate what name they used, or use Advanced connection below.`,
+      );
+      return;
+    }
+    connectWith(known);
+  };
+
+  const handleAdvancedConnect = (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!advUrl.trim() || !advToken.trim()) {
+      setError("Enter both the node API URL and Bearer token.");
+      return;
+    }
+    connectWith({
+      url: advUrl.trim(),
+      token: advToken.trim(),
+      ...(advWsUrl.trim() ? { wsUrl: advWsUrl.trim() } : {}),
+    });
   };
 
   const copyShareUrl = () => {
@@ -137,53 +156,12 @@ export function ConnectionScreen({ onConnect }: { onConnect: (connection: Connec
               <CircleCheck className="h-3.5 w-3.5" /> Docker Network Ready
             </span>
             <h1 className="mt-6 max-w-xl text-4xl font-semibold leading-tight text-foreground sm:text-5xl">
-              Connect to your blockchain node.
+              Join your blockchain node.
             </h1>
             <p className="mt-5 max-w-lg text-base leading-7 text-muted-foreground">
               Inspect consensus mechanisms, validator selection probabilities, mempool transactions,
               and live slashing events in real time.
             </p>
-
-            <div className="mt-8 space-y-3">
-              <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                1-Click Preset Connections
-              </div>
-              <div className="flex flex-wrap gap-3">
-                <Button
-                  type="button"
-                  variant="default"
-                  onClick={() => {
-                    setUrl(ALICE_CONNECTION.url);
-                    setToken(ALICE_CONNECTION.token);
-                    setWsUrl(ALICE_CONNECTION.wsUrl ?? "");
-                    handleConnect(
-                      ALICE_CONNECTION.url,
-                      ALICE_CONNECTION.token,
-                      ALICE_CONNECTION.wsUrl,
-                    );
-                  }}
-                  className="flex items-center gap-2 shadow-md"
-                >
-                  <Zap className="h-4 w-4 text-warning" />
-                  Connect to Peer Alice (:6001)
-                </Button>
-
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => {
-                    setUrl(BOB_CONNECTION.url);
-                    setToken(BOB_CONNECTION.token);
-                    setWsUrl(BOB_CONNECTION.wsUrl ?? "");
-                    handleConnect(BOB_CONNECTION.url, BOB_CONNECTION.token, BOB_CONNECTION.wsUrl);
-                  }}
-                  className="flex items-center gap-2"
-                >
-                  <Server className="h-4 w-4 text-primary" />
-                  Connect to Peer Bob (:6011)
-                </Button>
-              </div>
-            </div>
 
             <div className="mt-10 grid max-w-xl gap-4 sm:grid-cols-3">
               {[
@@ -203,52 +181,26 @@ export function ConnectionScreen({ onConnect }: { onConnect: (connection: Connec
             </div>
           </div>
 
-          <form
-            className="panel p-6 sm:p-7"
-            onSubmit={(event) => {
-              event.preventDefault();
-              handleConnect(url, token, wsUrl);
-            }}
-          >
+          <form className="panel p-6 sm:p-7" onSubmit={handleJoin}>
             <div className="mb-6">
-              <h2 className="text-lg font-semibold">Node Credentials</h2>
+              <h2 className="text-lg font-semibold">Join as your peer</h2>
               <p className="mt-1 text-sm text-muted-foreground">
-                Custom API endpoint & auth token.
+                Enter the name you used when starting your node.
               </p>
             </div>
 
             <div className="space-y-5">
               <div className="space-y-2">
-                <Label htmlFor="node-url">Node API URL</Label>
+                <Label htmlFor="peer-name">Name</Label>
                 <Input
-                  id="node-url"
-                  value={url}
-                  onChange={(e) => setUrl(e.target.value)}
-                  placeholder="http://localhost:6001"
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="node-ws-url">Events WebSocket URL (optional)</Label>
-                <Input
-                  id="node-ws-url"
-                  value={wsUrl}
-                  onChange={(e) => setWsUrl(e.target.value)}
-                  placeholder="wss://example.com/events"
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="node-token">Bearer Token</Label>
-                <Input
-                  id="node-token"
-                  type="password"
-                  value={token}
-                  onChange={(e) => setToken(e.target.value)}
-                  placeholder="demo-token-alice"
+                  id="peer-name"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  placeholder="alice"
+                  autoFocus
                 />
                 <p className="text-xs leading-5 text-muted-foreground">
-                  Default preset: <code className="rounded bg-muted px-1 py-0.5">demo-token-alice</code>
+                  Known nodes: {KNOWN_NAMES.join(", ")}
                 </p>
               </div>
 
@@ -269,6 +221,52 @@ export function ConnectionScreen({ onConnect }: { onConnect: (connection: Connec
                   </>
                 )}
               </Button>
+            </div>
+
+            <div className="mt-5 border-t border-border pt-4">
+              <button
+                type="button"
+                onClick={() => setShowAdvanced(!showAdvanced)}
+                className="flex items-center gap-2 text-xs font-medium text-muted-foreground hover:text-foreground"
+              >
+                <Settings2 className="h-3.5 w-3.5" />
+                Advanced: connect by URL (spectators / custom deployments)
+              </button>
+
+              {showAdvanced && (
+                <form className="mt-4 space-y-4" onSubmit={handleAdvancedConnect}>
+                  <div className="space-y-2">
+                    <Label htmlFor="node-url">Node API URL</Label>
+                    <Input
+                      id="node-url"
+                      value={advUrl}
+                      onChange={(e) => setAdvUrl(e.target.value)}
+                      placeholder="http://localhost:6001"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="node-ws-url">Events WebSocket URL (optional)</Label>
+                    <Input
+                      id="node-ws-url"
+                      value={advWsUrl}
+                      onChange={(e) => setAdvWsUrl(e.target.value)}
+                      placeholder="wss://example.com/events"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="node-token">Bearer Token</Label>
+                    <Input
+                      id="node-token"
+                      type="password"
+                      value={advToken}
+                      onChange={(e) => setAdvToken(e.target.value)}
+                    />
+                  </div>
+                  <Button className="w-full" variant="outline" size="sm" disabled={loading}>
+                    Connect with URL
+                  </Button>
+                </form>
+              )}
             </div>
 
             <div className="mt-5 flex items-start gap-2 border-t border-border pt-4 text-xs leading-5 text-muted-foreground">
