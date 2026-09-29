@@ -4,6 +4,11 @@ For Shreyas (build) and Adarsh (UX test + demo script). Goal: not just
 "functional dashboard" — something that visibly *pops* on a judge's screen
 in the 2-3 minutes they'll actually watch.
 
+**A working scaffold exists in `web/`** (Vite + React + TypeScript + Tailwind
++ shadcn/ui, fintech-clean direction) — see `web/README.md` for what's built
+vs. not. Base flow below is already implemented; Tier 1/2 below is the
+remaining work.
+
 ## Base flow
 
 1. **Connect screen** (one-time, store in localStorage): node API URL
