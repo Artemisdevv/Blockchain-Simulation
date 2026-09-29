@@ -103,6 +103,50 @@ def create_app(peer, loop, token, limiter: RateLimiter, auth_tracker: FailedAuth
             "peer_count": len(peer.known_peers),
         })
 
+    @app.post("/malicious/trigger")
+    def post_malicious_trigger():
+        data = request.get_json(force=True, silent=True) or {}
+        attack_type = data.get("attack_type", "double_sign")
+
+        if not Chain.instance or len(Chain.instance.chain) == 0:
+            return jsonify({"ok": False, "error": "Chain not initialized or empty"}), 400
+
+        last_pos = len(Chain.instance.chain) - 1
+        target_block = Chain.instance.chain[last_pos]
+
+        target_block.is_valid = False
+        target_block.slash_creator = True
+
+        import uuid, base64
+        pkt = {
+            "type": "slash_announcement",
+            "id": str(uuid.uuid4()),
+            "evidence1": target_block.to_dict_with_stakers(),
+            "evidence2": target_block.to_dict_with_stakers(),
+            "block1_sign": base64.b64encode(target_block.sign or b"invalid").decode(),
+            "block2_sign": base64.b64encode(target_block.sign or b"invalid").decode(),
+            "pos": last_pos
+        }
+
+        run_coro(peer.broadcast_message(pkt))
+
+        try:
+            from webapi.events import push_event
+            push_event({
+                "type": "node_slashed",
+                "creator": target_block.creator,
+                "block_pos": last_pos
+            })
+        except Exception as e:
+            print("Failed to push node_slashed event:", e)
+
+        return jsonify({
+            "ok": True,
+            "attack": attack_type,
+            "target_block_pos": last_pos,
+            "message": "Malicious double-sign attack triggered. Slashing evidence broadcast to network."
+        })
+
     @app.get("/chain")
     def get_chain():
         if not Chain.instance:
