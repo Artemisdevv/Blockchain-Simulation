@@ -44,7 +44,7 @@ services:
       MALICIOUS: "n"
       STAKER: "y"
       WEBAPI_TOKEN: demo-token-alice
-      WEBAPI_CORS_ORIGINS: ${WEBAPI_CORS_ORIGINS:-http://localhost:5173,http://127.0.0.1:5173,http://192.168.1.37:8080}
+      WEBAPI_CORS_ORIGINS: ${WEBAPI_CORS_ORIGINS:-http://localhost:5173,http://127.0.0.1:5173}
     ports:
       - "6001:6000"  # web API
       - "6002:6001"  # events websocket
@@ -74,7 +74,7 @@ services:
       MALICIOUS: "n"
       STAKER: "y"
       WEBAPI_TOKEN: demo-token-bob
-      WEBAPI_CORS_ORIGINS: ${WEBAPI_CORS_ORIGINS:-http://localhost:5173,http://127.0.0.1:5173,http://192.168.1.37:8080}
+      WEBAPI_CORS_ORIGINS: ${WEBAPI_CORS_ORIGINS:-http://localhost:5173,http://127.0.0.1:5173}
     ports:
       - "6011:6000"
       - "6012:6001"

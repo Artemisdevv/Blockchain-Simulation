@@ -165,11 +165,13 @@ export function connectEventsWs(
   try {
     const url = new URL(connection.wsUrl || connection.url);
     if (!connection.wsUrl) {
+      const restPort = url.port;
       const wsProtocol = url.protocol === "https:" ? "wss:" : "ws:";
-      const restPort = url.port ? parseInt(url.port, 10) : 80;
-      const wsPort = restPort + 1;
       url.protocol = wsProtocol;
-      url.port = String(wsPort);
+      // Keep the same origin's default 80/443 port for tunneled URLs. When
+      // the REST URL has an explicit port (as in local Compose), retain the
+      // established port+1 convention for the events socket.
+      url.port = restPort ? String(parseInt(restPort, 10) + 1) : "";
       url.pathname = "/events";
     }
     url.searchParams.set("token", connection.token);
