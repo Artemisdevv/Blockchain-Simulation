@@ -12,7 +12,11 @@ export const formatTime = (value: number) =>
 export function CopyValue({ value, compact = false }: { value: string; compact?: boolean }) {
   const [copied, setCopied] = useState(false);
   return (
-    <span className="inline-flex min-w-0 items-center gap-1 font-mono text-xs">
+    <span
+      className={`${
+        compact ? "inline-flex" : "flex w-full"
+      } min-w-0 items-center gap-1 font-mono text-xs`}
+    >
       <span className="truncate">{compact ? shortKey(value) : value}</span>
       <Button
         variant="ghost"
