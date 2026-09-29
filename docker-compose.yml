@@ -43,6 +43,7 @@ services:
       ROOM_ID: demo
       MALICIOUS: "n"
       STAKER: "y"
+      WEBAPI_TOKEN: demo-token-alice
     ports:
       - "6001:6000"  # web API
       - "6002:6001"  # events websocket
@@ -71,6 +72,7 @@ services:
       ROOM_ID: demo
       MALICIOUS: "n"
       STAKER: "y"
+      WEBAPI_TOKEN: demo-token-bob
     ports:
       - "6011:6000"
       - "6012:6001"

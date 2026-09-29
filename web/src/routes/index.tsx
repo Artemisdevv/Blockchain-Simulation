@@ -1,7 +1,8 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
-import { ConnectionScreen, type Connection } from "@/features/blockchain/ConnectionScreen";
+import { ConnectionScreen } from "@/features/blockchain/ConnectionScreen";
 import { Dashboard } from "@/features/blockchain/Dashboard";
+import type { Connection } from "@/lib/api-client";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -29,6 +30,30 @@ function Index() {
   const [hydrated, setHydrated] = useState(false);
 
   useEffect(() => {
+    // 1. Check for query parameters for zero-friction auto-connect / spectator mode
+    const params = new URLSearchParams(window.location.search);
+    const qNode = params.get("node");
+    const qUrl = params.get("url");
+    const qToken = params.get("token");
+
+    let autoConn: Connection | null = null;
+
+    if (qNode === "alice") {
+      autoConn = { url: "http://localhost:6001", token: "demo-token-alice" };
+    } else if (qNode === "bob") {
+      autoConn = { url: "http://localhost:6011", token: "demo-token-bob" };
+    } else if (qUrl && qToken) {
+      autoConn = { url: qUrl, token: qToken };
+    }
+
+    if (autoConn) {
+      window.localStorage.setItem("consensus-console-connection", JSON.stringify(autoConn));
+      setConnection(autoConn);
+      setHydrated(true);
+      return;
+    }
+
+    // 2. Fallback to localStorage saved connection
     const saved = window.localStorage.getItem("consensus-console-connection");
     if (saved) {
       try {
@@ -41,6 +66,7 @@ function Index() {
   }, []);
 
   if (!hydrated) return <div className="min-h-screen bg-background" />;
+
   if (!connection)
     return (
       <ConnectionScreen
@@ -50,6 +76,7 @@ function Index() {
         }}
       />
     );
+
   return (
     <Dashboard
       connection={connection}

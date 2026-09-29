@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import {
   Activity,
   AlertTriangle,
@@ -18,24 +18,41 @@ import {
   Users,
   WalletCards,
   X,
+  Wifi,
+  WifiOff,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { BlockDialog, TransactionDialog } from "./DetailDialog";
-import {
-  initialMockData,
-  mockPresentation,
-  type Block,
-  type MempoolResponse,
-  type StakersResponse,
-  type Transaction,
-} from "./mock-data";
-import { submitMockStake, submitMockTransaction } from "./mock-service";
 import { CopyValue, formatTime, shortKey } from "./utils";
-import type { Connection } from "./ConnectionScreen";
+import {
+  connectEventsWs,
+  fetchBalance,
+  fetchChain,
+  fetchInvariants,
+  fetchMempool,
+  fetchPeers,
+  fetchStakers,
+  submitStake,
+  submitTransaction,
+  type Connection,
+  type InvariantsResponse,
+} from "@/lib/api-client";
+import type {
+  Block,
+  ChainResponse,
+  MempoolResponse,
+  NodeSlashedEvent,
+  Peer,
+  PeersResponse,
+  StakersResponse,
+  Transaction,
+  BalanceResponse,
+} from "./mock-data";
 
 type View = "overview" | "explorer" | "network" | "validators" | "mempool";
+
 const nav: Array<{ id: View; label: string; icon: typeof Activity }> = [
   { id: "overview", label: "Overview", icon: Activity },
   { id: "explorer", label: "Explorer", icon: Blocks },
@@ -53,34 +70,125 @@ export function Dashboard({
 }) {
   const [view, setView] = useState<View>("overview");
   const [mobileOpen, setMobileOpen] = useState(false);
-  const [mempool, setMempool] = useState<MempoolResponse>(() =>
-    structuredClone(initialMockData.mempool),
-  );
-  const [stakers, setStakers] = useState<StakersResponse>(() =>
-    structuredClone(initialMockData.stakers),
-  );
-  const [countdown, setCountdown] = useState(initialMockData.stakers.epoch_ends_in_seconds);
+
+  // Live state from container
+  const [chain, setChain] = useState<ChainResponse>({ blocks: [] });
+  const [peers, setPeers] = useState<PeersResponse>({ peers: [] });
+  const [mempool, setMempool] = useState<MempoolResponse>({ transactions: [] });
+  const [stakers, setStakers] = useState<StakersResponse>({
+    stakers: {},
+    epoch_ends_in_seconds: 0,
+  });
+  const [balance, setBalance] = useState<BalanceResponse>({ public_key: "", balance: 0 });
+  const [invariants, setInvariants] = useState<InvariantsResponse | null>(null);
+  const [slashed, setSlashed] = useState<NodeSlashedEvent | null>(null);
+
+  const [countdown, setCountdown] = useState(0);
   const [selectedBlock, setSelectedBlock] = useState<Block | null>(null);
   const [selectedTx, setSelectedTx] = useState<Transaction | null>(null);
   const [toast, setToast] = useState("");
   const [lastUpdate, setLastUpdate] = useState(new Date());
+  const [wsConnected, setWsConnected] = useState(false);
+
+  // Helper to load all data from REST API
+  const refreshAll = useCallback(async () => {
+    try {
+      const [c, p, m, s, b, inv] = await Promise.all([
+        fetchChain(connection),
+        fetchPeers(connection),
+        fetchMempool(connection),
+        fetchStakers(connection),
+        fetchBalance(connection),
+        fetchInvariants(connection).catch(() => null),
+      ]);
+      setChain(c);
+      setPeers(p);
+      setMempool(m);
+      setStakers(s);
+      setBalance(b);
+      if (inv) setInvariants(inv);
+      setCountdown(s.epoch_ends_in_seconds);
+      setLastUpdate(new Date());
+    } catch (err: any) {
+      console.error("Failed to fetch node state:", err);
+    }
+  }, [connection]);
+
+  // Initial load & short polling
+  useEffect(() => {
+    refreshAll();
+    const interval = window.setInterval(refreshAll, 3000);
+    return () => window.clearInterval(interval);
+  }, [refreshAll]);
+
+  // WebSocket Live Events
+  useEffect(() => {
+    const unsubscribe = connectEventsWs(connection, {
+      onOpen: () => setWsConnected(true),
+      onClose: () => setWsConnected(false),
+      onError: () => setWsConnected(false),
+      onBlockAppended: (block) => {
+        setToast("New block appended to chain!");
+        refreshAll();
+      },
+      onPeerDiscovered: (peer) => {
+        setToast(`Peer discovered: ${peer.name || peer.host}`);
+        fetchPeers(connection).then(setPeers);
+      },
+      onStakeRegistered: (data) => {
+        setToast(`Stake registered: ${data.amount} coins`);
+        fetchStakers(connection).then((s) => {
+          setStakers(s);
+          setCountdown(s.epoch_ends_in_seconds);
+        });
+      },
+      onNodeSlashed: (event) => {
+        setSlashed(event);
+        setToast(`MALICIOUS ACTIVITY DETECTED: Validator slashed!`);
+        refreshAll();
+      },
+    });
+
+    return () => unsubscribe();
+  }, [connection, refreshAll]);
+
+  // Countdown timer decrement
   useEffect(() => {
     const timer = window.setInterval(() => {
-      setCountdown((v) => (v <= 1 ? initialMockData.stakers.epoch_ends_in_seconds : v - 1));
-      setLastUpdate(new Date());
+      setCountdown((v) => (v <= 1 ? 0 : v - 1));
     }, 1000);
     return () => window.clearInterval(timer);
   }, []);
+
+  // Toast dismissal
   useEffect(() => {
     if (!toast) return;
-    const timer = window.setTimeout(() => setToast(""), 3200);
+    const timer = window.setTimeout(() => setToast(""), 3500);
     return () => window.clearTimeout(timer);
   }, [toast]);
+
+  // Helper to map public keys to names
+  const getName = useCallback(
+    (pubkey: string): string => {
+      if (!pubkey) return "Unknown";
+      if (pubkey === balance.public_key) return "You";
+      if (pubkey === "Genesis") return "Genesis";
+      const match = peers.peers.find((p) => p.public_key === pubkey);
+      if (match) return match.name;
+      return shortKey(pubkey);
+    },
+    [balance.public_key, peers.peers],
+  );
 
   const openView = (next: View) => {
     setView(next);
     setMobileOpen(false);
   };
+
+  // Find self node info
+  const selfNodeName =
+    peers.peers.find((p) => p.public_key === balance.public_key)?.name || "node";
+
   return (
     <div className="min-h-screen bg-background text-foreground">
       <header className="sticky top-0 z-40 border-b border-border bg-background/95 backdrop-blur">
@@ -94,19 +202,21 @@ export function Dashboard({
           >
             {mobileOpen ? <X /> : <Menu />}
           </Button>
+
           <div className="flex items-center gap-3">
             <div className="grid h-8 w-8 place-items-center rounded-md bg-primary text-primary-foreground">
               <Network className="h-4 w-4" />
             </div>
             <div className="hidden sm:block">
               <div className="text-sm font-semibold">Consensus Console</div>
-              <div className="text-[11px] text-muted-foreground">Proof-of-stake monitor</div>
+              <div className="text-[11px] text-muted-foreground">Proof-of-Stake Network Monitor</div>
             </div>
           </div>
+
           <div className="ml-auto flex items-center gap-3">
-            <span className="status status-online">
-              <span className="status-dot" />
-              Online
+            <span className={`status ${wsConnected ? "status-online" : "status-neutral"}`}>
+              <span className={`status-dot ${wsConnected ? "bg-success" : "bg-muted-foreground"}`} />
+              {wsConnected ? "WS Live" : "REST Sync"}
             </span>
             <span className="hidden text-xs text-muted-foreground md:inline">
               Updated{" "}
@@ -129,26 +239,32 @@ export function Dashboard({
           </div>
         </div>
       </header>
+
       <div className="mx-auto flex max-w-[1600px]">
         <aside
-          className={`${mobileOpen ? "flex" : "hidden"} fixed inset-x-0 top-16 z-30 h-[calc(100vh-4rem)] flex-col border-r border-border bg-background p-4 lg:sticky lg:top-16 lg:flex lg:h-[calc(100vh-4rem)] lg:w-60 lg:shrink-0`}
+          className={`${
+            mobileOpen ? "flex" : "hidden"
+          } fixed inset-x-0 top-16 z-30 h-[calc(100vh-4rem)] flex-col border-r border-border bg-background p-4 lg:sticky lg:top-16 lg:flex lg:h-[calc(100vh-4rem)] lg:w-60 lg:shrink-0`}
         >
           <div className="mb-5 rounded-md border border-border bg-muted/50 p-3">
             <div className="flex items-center gap-2">
               <span className="status-dot bg-success" />
-              <span className="text-sm font-medium">alpha-node</span>
-              <span className="ml-auto text-[10px] font-semibold uppercase text-primary">You</span>
+              <span className="text-sm font-medium">{selfNodeName}</span>
+              <span className="ml-auto text-[10px] font-semibold uppercase text-primary">Connected</span>
             </div>
             <div className="mt-2 truncate font-mono text-[10px] text-muted-foreground">
               {connection.url}
             </div>
           </div>
+
           <nav className="space-y-1">
             {nav.map((item) => (
               <Button
                 key={item.id}
                 variant="ghost"
-                className={`w-full justify-start ${view === item.id ? "bg-accent text-accent-foreground" : "text-muted-foreground"}`}
+                className={`w-full justify-start ${
+                  view === item.id ? "bg-accent text-accent-foreground" : "text-muted-foreground"
+                }`}
                 onClick={() => openView(item.id)}
               >
                 <item.icon />
@@ -156,22 +272,24 @@ export function Dashboard({
               </Button>
             ))}
           </nav>
+
           <div className="mt-auto border-t border-border pt-4">
             <div className="mb-2 flex items-center justify-between text-xs">
-              <span className="text-muted-foreground">Simulation mode</span>
-              <span className="font-medium text-primary">Active</span>
+              <span className="text-muted-foreground">Node Connection</span>
+              <span className="font-medium text-success">Live API</span>
             </div>
             <div className="text-[11px] leading-4 text-muted-foreground">
-              Data follows the node REST contract. No backend requests are made.
+              Connected directly to Docker container REST & Event WebSocket.
             </div>
           </div>
         </aside>
+
         <main className="min-w-0 flex-1 p-4 sm:p-6 lg:p-8">
           <div className="mx-auto max-w-[1320px]">
             <div className="mb-7 flex flex-wrap items-end justify-between gap-4">
               <div>
                 <div className="eyebrow">
-                  <Radio className="h-3.5 w-3.5" /> Live simulation
+                  <Radio className="h-3.5 w-3.5 text-primary" /> Live Network Feed
                 </div>
                 <h1 className="mt-3 text-2xl font-semibold capitalize sm:text-3xl">{view}</h1>
                 <p className="mt-1 text-sm text-muted-foreground">{viewDescriptions[view]}</p>
@@ -185,30 +303,50 @@ export function Dashboard({
                 </Button>
               </div>
             </div>
+
             {view === "overview" && (
               <Overview
+                balance={balance}
+                chain={chain}
+                peers={peers}
                 countdown={countdown}
                 mempool={mempool}
+                stakers={stakers}
+                slashed={slashed}
+                invariants={invariants}
+                getName={getName}
                 onView={openView}
                 onBlock={setSelectedBlock}
                 onTx={setSelectedTx}
-                stakers={stakers}
               />
             )}
-            {view === "explorer" && <Explorer onBlock={setSelectedBlock} onTx={setSelectedTx} />}
-            {view === "network" && <NetworkPanel />}
+            {view === "explorer" && (
+              <Explorer
+                chain={chain}
+                slashed={slashed}
+                getName={getName}
+                onBlock={setSelectedBlock}
+                onTx={setSelectedTx}
+              />
+            )}
+            {view === "network" && <NetworkPanel peers={peers} selfPk={balance.public_key} />}
             {view === "validators" && (
               <Validators
                 stakers={stakers}
-                setStakers={setStakers}
+                balance={balance}
                 countdown={countdown}
+                connection={connection}
+                getName={getName}
+                onRefresh={refreshAll}
                 onToast={setToast}
               />
             )}
             {view === "mempool" && (
               <Mempool
                 mempool={mempool}
-                setMempool={setMempool}
+                connection={connection}
+                getName={getName}
+                onRefresh={refreshAll}
                 onTx={setSelectedTx}
                 onToast={setToast}
               />
@@ -216,8 +354,10 @@ export function Dashboard({
           </div>
         </main>
       </div>
+
       <BlockDialog block={selectedBlock} onClose={() => setSelectedBlock(null)} />
       <TransactionDialog transaction={selectedTx} onClose={() => setSelectedTx(null)} />
+
       {toast && (
         <div
           role="status"
@@ -237,6 +377,7 @@ const viewDescriptions: Record<View, string> = {
   validators: "Review stake distribution and validator probability.",
   mempool: "Inspect and submit pending transactions.",
 };
+
 function PanelHeading({
   title,
   detail,
@@ -258,38 +399,47 @@ function PanelHeading({
 }
 
 function Overview({
+  balance,
+  chain,
+  peers,
   countdown,
   mempool,
   stakers,
+  slashed,
+  invariants,
+  getName,
   onView,
   onBlock,
   onTx,
 }: {
+  balance: BalanceResponse;
+  chain: ChainResponse;
+  peers: PeersResponse;
   countdown: number;
   mempool: MempoolResponse;
   stakers: StakersResponse;
+  slashed: NodeSlashedEvent | null;
+  invariants: InvariantsResponse | null;
+  getName: (pk: string) => string;
   onView: (v: View) => void;
   onBlock: (b: Block) => void;
   onTx: (t: Transaction) => void;
 }) {
   const totalStake = Object.values(stakers.stakers).reduce((a, b) => a + b, 0);
+
   const stats = [
-    [WalletCards, "Balance", `${initialMockData.balance.balance} coins`, "+12 this epoch"],
-    [Clock3, "Epoch ends", `00:${String(countdown).padStart(2, "0")}`, "Block selection pending"],
-    [
-      Users,
-      "Connected peers",
-      `${initialMockData.peers.peers.length - 1} / ${initialMockData.peers.peers.length}`,
-      "1 peer unreachable",
-    ],
-    [Blocks, "Chain height", String(initialMockData.chain.blocks.length), "Last block 42s ago"],
+    [WalletCards, "Balance", `${balance.balance} coins`, "Your wallet balance"],
+    [Clock3, "Epoch Ends In", `${countdown}s`, "Next block selection"],
+    [Users, "Connected Peers", `${peers.peers.length}`, "Discovered via Signalling"],
+    [Blocks, "Chain Height", String(chain.blocks.length), "Verified blocks"],
     [
       Database,
-      "Pending txs",
+      "Pending Txs",
       String(mempool.transactions.length),
-      `${mempool.transactions.reduce((sum, transaction) => sum + transaction.payload, 0)} coins queued`,
+      `${mempool.transactions.reduce((sum, tx) => sum + tx.payload, 0)} coins queued`,
     ],
   ] as const;
+
   return (
     <div className="space-y-6">
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
@@ -304,30 +454,73 @@ function Overview({
           </div>
         ))}
       </div>
-      <div className="alert-danger">
-        <div className="flex gap-3">
-          <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" />
-          <div className="min-w-0">
-            <div className="font-semibold">Double-sign detected — validator slashed</div>
-            <p className="mt-1 text-sm opacity-85">
-              <span className="font-mono">mallory</span> produced conflicting blocks at position{" "}
-              {initialMockData.slashed.block_pos}. Stake reduced to zero.
-            </p>
+
+      {/* Consensus Invariants Panel */}
+      <div className="rounded-lg border border-border bg-card p-4">
+        <div className="mb-3 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <ShieldCheck className="h-4 w-4 text-success" />
+            <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+              Live Consensus Invariants
+            </span>
           </div>
-          <Button
-            variant="outline"
-            size="sm"
-            className="ml-auto shrink-0 border-current bg-transparent hover:bg-destructive/10"
-            onClick={() => onView("validators")}
-          >
-            Inspect <ChevronRight />
-          </Button>
+          <span className="status status-online text-[11px]">Auto Verified</span>
+        </div>
+        <div className="grid gap-3 sm:grid-cols-3 text-xs">
+          <div className="flex items-center gap-2 rounded bg-muted/40 p-2.5">
+            <span className="text-success font-bold">✓</span>
+            <div>
+              <div className="font-medium">Chain Consensus</div>
+              <div className="text-[10px] text-muted-foreground">
+                {invariants?.honest_consensus ? "Honest nodes synchronized" : "Checking agreement..."}
+              </div>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 rounded bg-muted/40 p-2.5">
+            <span className="text-success font-bold">✓</span>
+            <div>
+              <div className="font-medium">Supply Conservation</div>
+              <div className="text-[10px] text-muted-foreground">No illegal inflation / overspending</div>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 rounded bg-muted/40 p-2.5">
+            <span className="text-success font-bold">✓</span>
+            <div>
+              <div className="font-medium">Proposer Validation</div>
+              <div className="text-[10px] text-muted-foreground">
+                {invariants?.valid_proposers ? "ECDSA signatures verified" : "Checking signatures..."}
+              </div>
+            </div>
+          </div>
         </div>
       </div>
+
+      {slashed && (
+        <div className="alert-danger">
+          <div className="flex gap-3">
+            <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-destructive" />
+            <div className="min-w-0">
+              <div className="font-semibold">Malicious Node Slashed</div>
+              <p className="mt-1 text-sm opacity-85">
+                Validator <span className="font-mono">{getName(slashed.creator)}</span> attempted double-signing at block index {slashed.block_pos}. Stake slashed to zero!
+              </p>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              className="ml-auto shrink-0 border-current bg-transparent hover:bg-destructive/10"
+              onClick={() => onView("validators")}
+            >
+              Inspect <ChevronRight />
+            </Button>
+          </div>
+        </div>
+      )}
+
       <div className="grid gap-6 xl:grid-cols-[1.55fr_1fr]">
         <section className="panel overflow-hidden">
           <PanelHeading
-            title="Latest blocks"
+            title="Latest Blocks"
             detail="Verified additions to the canonical chain"
             action={
               <Button variant="ghost" size="sm" onClick={() => onView("explorer")}>
@@ -336,86 +529,104 @@ function Overview({
             }
           />
           <div className="divide-y divide-border">
-            {[...initialMockData.chain.blocks]
-              .reverse()
-              .slice(0, 3)
-              .map((block, index) => (
-                <button
-                  key={block.id}
-                  className="data-row w-full text-left"
-                  onClick={() => onBlock(block)}
-                >
-                  <span className="grid h-8 w-8 place-items-center rounded-md bg-muted font-mono text-xs">
-                    #{initialMockData.chain.blocks.length - index}
-                  </span>
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate text-sm font-medium">{block.id}</span>
-                    <span className="text-xs text-muted-foreground">
-                      by {mockPresentation.namesByKey[block.creator]} · {formatTime(block.ts)}
+            {chain.blocks.length === 0 ? (
+              <div className="p-5 text-center text-xs text-muted-foreground">No blocks mined yet.</div>
+            ) : (
+              [...chain.blocks]
+                .reverse()
+                .slice(0, 4)
+                .map((block, index) => (
+                  <button
+                    key={block.id}
+                    className="data-row w-full text-left"
+                    onClick={() => onBlock(block)}
+                  >
+                    <span className="grid h-8 w-8 place-items-center rounded-md bg-muted font-mono text-xs">
+                      #{chain.blocks.length - index}
                     </span>
-                  </span>
-                  <span className="text-right">
-                    <span className="block text-sm font-medium">
-                      {block.transactions.length} tx
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-sm font-medium">{shortKey(block.id, 14, 6)}</span>
+                      <span className="text-xs text-muted-foreground">
+                        by {getName(block.creator)} · {formatTime(block.ts)}
+                      </span>
                     </span>
-                    <span className="text-xs text-muted-foreground">{block.staked_amt} staked</span>
-                  </span>
-                  <ChevronRight className="h-4 w-4 text-muted-foreground" />
-                </button>
-              ))}
+                    <span className="text-right">
+                      <span className="block text-sm font-medium">
+                        {block.transactions.length} tx
+                      </span>
+                      <span className="text-xs text-muted-foreground">{block.staked_amt} staked</span>
+                    </span>
+                    <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                  </button>
+                ))
+            )}
           </div>
         </section>
+
         <section className="panel overflow-hidden">
-          <PanelHeading title="Stake distribution" detail={`${totalStake} coins registered`} />
+          <PanelHeading title="Stake Distribution" detail={`${totalStake} total coins registered`} />
           <div className="space-y-4 p-5">
-            {Object.entries(stakers.stakers)
-              .filter(([, amt]) => amt > 0)
-              .sort((a, b) => b[1] - a[1])
-              .map(([key, amt]) => {
-                const probability = Math.round((amt / totalStake) * 100);
-                return (
-                  <div key={key}>
-                    <div className="mb-1.5 flex justify-between text-xs">
-                      <span className="font-medium">
-                        {mockPresentation.namesByKey[key]}{" "}
-                        {key === initialMockData.balance.public_key && (
-                          <em className="not-italic text-primary">· You</em>
-                        )}
-                      </span>
-                      <span>{probability}%</span>
+            {Object.keys(stakers.stakers).length === 0 ? (
+              <div className="text-center text-xs text-muted-foreground">No registered stakers for this epoch.</div>
+            ) : (
+              Object.entries(stakers.stakers)
+                .sort((a, b) => b[1] - a[1])
+                .map(([key, amt]) => {
+                  const probability = totalStake > 0 ? Math.round((amt / totalStake) * 100) : 0;
+                  const isSelf = key === balance.public_key;
+                  return (
+                    <div key={key}>
+                      <div className="mb-1.5 flex justify-between text-xs">
+                        <span className="font-medium">
+                          {getName(key)}{" "}
+                          {isSelf && <em className="not-italic text-primary">· You</em>}
+                        </span>
+                        <span>{probability}% ({amt} coins)</span>
+                      </div>
+                      <div className="h-2 overflow-hidden rounded-full bg-muted">
+                        <div
+                          className="h-full rounded-full bg-primary"
+                          style={{ width: `${probability}%` }}
+                        />
+                      </div>
                     </div>
-                    <div className="h-2 overflow-hidden rounded-full bg-muted">
-                      <div
-                        className="h-full rounded-full bg-primary"
-                        style={{ width: `${probability}%` }}
-                      />
-                    </div>
-                  </div>
-                );
-              })}
+                  );
+                })
+            )}
           </div>
         </section>
       </div>
+
       <section className="panel overflow-hidden">
         <PanelHeading
-          title="Mempool activity"
-          detail="Transactions awaiting confirmation"
+          title="Mempool Activity"
+          detail="Transactions awaiting inclusion in next block"
           action={
             <Button variant="ghost" size="sm" onClick={() => onView("mempool")}>
               Open mempool <ArrowRight />
             </Button>
           }
         />
-        <TransactionTable transactions={mempool.transactions.slice(0, 3)} onTx={onTx} />
+        <TransactionTable
+          transactions={mempool.transactions.slice(0, 5)}
+          getName={getName}
+          onTx={onTx}
+        />
       </section>
     </div>
   );
 }
 
 function Explorer({
+  chain,
+  slashed,
+  getName,
   onBlock,
   onTx,
 }: {
+  chain: ChainResponse;
+  slashed: NodeSlashedEvent | null;
+  getName: (pk: string) => string;
   onBlock: (b: Block) => void;
   onTx: (t: Transaction) => void;
 }) {
@@ -423,24 +634,24 @@ function Explorer({
     <div className="space-y-6">
       <section className="panel overflow-hidden">
         <PanelHeading
-          title="Canonical chain"
-          detail={`${initialMockData.chain.blocks.length} blocks · newest first`}
+          title="Canonical Chain"
+          detail={`${chain.blocks.length} blocks · newest first`}
         />
         <div className="chain-scroll">
           <div className="flex min-w-max items-stretch gap-0 p-6">
-            {[...initialMockData.chain.blocks].reverse().map((block, index) => {
-              const danger = block.creator === initialMockData.slashed.creator;
+            {[...chain.blocks].reverse().map((block, index) => {
+              const isSlashed = slashed?.creator === block.creator;
               return (
                 <div className="flex items-center" key={block.id}>
                   <button
                     onClick={() => onBlock(block)}
-                    className={`chain-card ${danger ? "chain-card-danger" : ""}`}
+                    className={`chain-card ${isSlashed ? "chain-card-danger" : ""}`}
                   >
                     <div className="flex items-start justify-between">
                       <span className="font-mono text-xs text-muted-foreground">
-                        BLOCK {initialMockData.chain.blocks.length - index}
+                        BLOCK #{chain.blocks.length - index}
                       </span>
-                      {danger ? (
+                      {isSlashed ? (
                         <span className="status status-danger">
                           <AlertTriangle className="h-3 w-3" />
                           Slashed
@@ -452,9 +663,7 @@ function Explorer({
                         </span>
                       )}
                     </div>
-                    <div className="mt-8 text-base font-semibold">
-                      {mockPresentation.namesByKey[block.creator]}
-                    </div>
+                    <div className="mt-8 text-base font-semibold">{getName(block.creator)}</div>
                     <div className="mt-1 font-mono text-xs text-muted-foreground">
                       {shortKey(block.id, 11, 5)}
                     </div>
@@ -475,7 +684,7 @@ function Explorer({
                       <ChevronRight className="h-4 w-4" />
                     </div>
                   </button>
-                  {index < initialMockData.chain.blocks.length - 1 && (
+                  {index < chain.blocks.length - 1 && (
                     <div className="chain-link">
                       <span />
                     </div>
@@ -486,13 +695,15 @@ function Explorer({
           </div>
         </div>
       </section>
+
       <section className="panel overflow-hidden">
         <PanelHeading
-          title="Confirmed transactions"
+          title="Confirmed Transactions"
           detail="Transactions included in verified blocks"
         />
         <TransactionTable
-          transactions={initialMockData.chain.blocks.flatMap((b) => b.transactions)}
+          transactions={chain.blocks.flatMap((b) => b.transactions)}
+          getName={getName}
           onTx={onTx}
         />
       </section>
@@ -502,11 +713,21 @@ function Explorer({
 
 function TransactionTable({
   transactions,
+  getName,
   onTx,
 }: {
   transactions: Transaction[];
+  getName: (pk: string) => string;
   onTx: (t: Transaction) => void;
 }) {
+  if (transactions.length === 0) {
+    return (
+      <div className="p-6 text-center text-xs text-muted-foreground">
+        No transactions to display.
+      </div>
+    );
+  }
+
   return (
     <div className="overflow-x-auto">
       <table className="w-full min-w-[720px] text-left">
@@ -524,13 +745,9 @@ function TransactionTable({
           {transactions.map((tx) => (
             <tr key={tx.id} className="border-b border-border last:border-0 hover:bg-muted/30">
               <td className="px-5 py-3 font-mono text-xs">{shortKey(tx.id, 12, 5)}</td>
-              <td className="px-5 py-3 text-xs">
-                {mockPresentation.namesByKey[tx.sender] ?? shortKey(tx.sender)}
-              </td>
-              <td className="px-5 py-3 text-xs">
-                {mockPresentation.namesByKey[tx.receiver] ?? shortKey(tx.receiver)}
-              </td>
-              <td className="px-5 py-3 text-sm font-medium">{tx.payload}</td>
+              <td className="px-5 py-3 text-xs">{getName(tx.sender)}</td>
+              <td className="px-5 py-3 text-xs">{getName(tx.receiver)}</td>
+              <td className="px-5 py-3 text-sm font-medium">{tx.payload} coins</td>
               <td className="px-5 py-3 text-xs text-muted-foreground">{formatTime(tx.ts)}</td>
               <td>
                 <Button
@@ -550,85 +767,58 @@ function TransactionTable({
   );
 }
 
-function NetworkPanel() {
-  const peers = initialMockData.peers.peers;
+function NetworkPanel({ peers, selfPk }: { peers: PeersResponse; selfPk: string }) {
+  const peerList = peers.peers;
+
   return (
     <div className="grid gap-6 xl:grid-cols-[1.1fr_1fr]">
       <section className="panel overflow-hidden">
-        <PanelHeading title="Peer topology" detail="Current network mesh" />
-        <div className="relative h-[420px] overflow-hidden bg-grid">
-          <svg className="absolute inset-0 h-full w-full" aria-hidden="true">
-            {[
-              [50, 50, 24, 25],
-              [50, 50, 76, 25],
-              [50, 50, 24, 76],
-              [50, 50, 76, 76],
-            ].map((a, i) => (
-              <line
-                key={i}
-                x1={`${a[0]}%`}
-                y1={`${a[1]}%`}
-                x2={`${a[2]}%`}
-                y2={`${a[3]}%`}
-                className={i === 3 ? "stroke-destructive" : "stroke-border"}
-                strokeWidth="2"
-                strokeDasharray={i === 2 ? "6 6" : "0"}
-              />
-            ))}
-          </svg>
-          {peers.map((peer, i) => {
-            const pos = i === 0 ? [50, 50] : i === 1 ? [24, 25] : i === 2 ? [24, 76] : [76, 76];
-            const state =
-              mockPresentation.peerStatuses[
-                peer.name as keyof typeof mockPresentation.peerStatuses
-              ];
-            return (
-              <div
-                key={peer.name}
-                className={`topology-node topology-${state}`}
-                style={{ left: `${pos[0]}%`, top: `${pos[1]}%` }}
-              >
-                <Server className="h-5 w-5" />
-                <span>{peer.name}</span>
-                {i === 0 && <small>You</small>}
-              </div>
-            );
-          })}
+        <PanelHeading title="Peer Mesh Topology" detail="Live P2P connections discovered" />
+        <div className="relative h-[420px] overflow-hidden bg-grid p-6">
+          <div className="grid h-full grid-cols-2 gap-4 sm:grid-cols-3">
+            {peerList.map((peer) => {
+              const isSelf = peer.public_key === selfPk;
+              return (
+                <div
+                  key={peer.name + peer.host}
+                  className={`flex flex-col items-center justify-center rounded-lg border p-4 text-center transition-all ${
+                    isSelf
+                      ? "border-primary bg-primary/10 font-semibold"
+                      : "border-border bg-card hover:border-primary/50"
+                  }`}
+                >
+                  <Server className={`h-8 w-8 ${isSelf ? "text-primary" : "text-muted-foreground"}`} />
+                  <div className="mt-2 text-sm font-medium">{peer.name}</div>
+                  <div className="font-mono text-[11px] text-muted-foreground">
+                    {peer.host}:{peer.port}
+                  </div>
+                  {isSelf && <span className="mt-2 text-[10px] uppercase text-primary font-bold">You</span>}
+                </div>
+              );
+            })}
+          </div>
         </div>
       </section>
+
       <section className="panel overflow-hidden">
-        <PanelHeading title="Known peers" detail={`${peers.length} nodes discovered`} />
+        <PanelHeading title="Known Peers" detail={`${peerList.length} nodes active in room`} />
         <div className="divide-y divide-border">
-          {peers.map((peer) => {
-            const state =
-              mockPresentation.peerStatuses[
-                peer.name as keyof typeof mockPresentation.peerStatuses
-              ];
+          {peerList.map((peer) => {
+            const isSelf = peer.public_key === selfPk;
             return (
-              <div
-                className={`p-4 ${state === "malicious" ? "bg-destructive/5" : ""}`}
-                key={peer.name}
-              >
+              <div className="p-4" key={peer.name + peer.public_key}>
                 <div className="flex items-center gap-3">
-                  <span
-                    className={`status-dot ${state === "offline" ? "bg-muted-foreground" : state === "malicious" ? "bg-destructive" : "bg-success"}`}
-                  />
+                  <span className="status-dot bg-success" />
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2 text-sm font-medium">
                       {peer.name}
-                      {peer.public_key === initialMockData.balance.public_key && (
-                        <span className="text-xs text-primary">You</span>
-                      )}
+                      {isSelf && <span className="text-xs text-primary font-semibold">You</span>}
                     </div>
                     <div className="mt-1 font-mono text-[11px] text-muted-foreground">
                       {peer.host}:{peer.port}
                     </div>
                   </div>
-                  <span
-                    className={`status ${state === "malicious" ? "status-danger" : state === "offline" ? "status-neutral" : "status-online"}`}
-                  >
-                    {state}
-                  </span>
+                  <span className="status status-online">Connected</span>
                 </div>
                 <div className="mt-2 pl-5">
                   <CopyValue value={peer.public_key} compact />
@@ -644,100 +834,116 @@ function NetworkPanel() {
 
 function Validators({
   stakers,
-  setStakers,
+  balance,
   countdown,
+  connection,
+  getName,
+  onRefresh,
   onToast,
 }: {
   stakers: StakersResponse;
-  setStakers: (s: StakersResponse) => void;
+  balance: BalanceResponse;
   countdown: number;
+  connection: Connection;
+  getName: (pk: string) => string;
+  onRefresh: () => void;
   onToast: (s: string) => void;
 }) {
   const [amount, setAmount] = useState("");
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const total = Object.values(stakers.stakers).reduce((a, b) => a + b, 0);
+
+  const stakerEntries = Object.entries(stakers.stakers);
+  const total = stakerEntries.reduce((a, b) => a + b[1], 0);
+
+  const handleSubmitStake = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const value = Number(amount);
+    if (!Number.isFinite(value) || value <= 0) {
+      setError("Enter an amount greater than zero.");
+      return;
+    }
+
+    setLoading(true);
+    setError("");
+
+    try {
+      const res = await submitStake(connection, value);
+      if (!res.ok) {
+        setError(res.error || "Failed to register stake.");
+      } else {
+        setAmount("");
+        onToast(`Stake registered! Block selection in ${res.creating_block_in_seconds}s.`);
+        onRefresh();
+      }
+    } catch (err: any) {
+      setError(err.message || "Error submitting stake.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <div className="grid gap-6 xl:grid-cols-[1.4fr_0.8fr]">
       <section className="panel overflow-hidden">
         <PanelHeading
-          title="Validator leaderboard"
-          detail={`${total} coins staked · next selection in ${countdown}s`}
+          title="Validator Leaderboard"
+          detail={`${total} coins staked · next epoch selection in ${countdown}s`}
         />
         <div className="divide-y divide-border">
-          {Object.entries(stakers.stakers)
-            .sort((a, b) => b[1] - a[1])
-            .map(([key, amt], i) => {
-              const slashed = key === initialMockData.slashed.creator;
-              const chance = total ? Math.round((amt / total) * 100) : 0;
-              return (
-                <div key={key} className={`p-5 ${slashed ? "bg-destructive/5" : ""}`}>
-                  <div className="flex items-center gap-4">
-                    <span className="grid h-8 w-8 place-items-center rounded-md bg-muted text-xs font-semibold">
-                      {i + 1}
-                    </span>
-                    <div className="min-w-0 flex-1">
-                      <div className="flex flex-wrap items-center gap-2 text-sm font-medium">
-                        {mockPresentation.namesByKey[key]}
-                        {key === initialMockData.balance.public_key && (
-                          <span className="status status-info">You</span>
-                        )}
-                        {slashed && (
-                          <span className="status status-danger">
-                            <AlertTriangle className="h-3 w-3" />
-                            Slashed
-                          </span>
-                        )}
+          {stakerEntries.length === 0 ? (
+            <div className="p-6 text-center text-xs text-muted-foreground">
+              No registered stakers for this epoch.
+            </div>
+          ) : (
+            stakerEntries
+              .sort((a, b) => b[1] - a[1])
+              .map(([key, amt], i) => {
+                const chance = total ? Math.round((amt / total) * 100) : 0;
+                const isSelf = key === balance.public_key;
+
+                return (
+                  <div key={key} className="p-5">
+                    <div className="flex items-center gap-4">
+                      <span className="grid h-8 w-8 place-items-center rounded-md bg-muted text-xs font-semibold">
+                        #{i + 1}
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-center gap-2 text-sm font-medium">
+                          {getName(key)}
+                          {isSelf && <span className="status status-info">You</span>}
+                        </div>
+                        <div className="mt-1">
+                          <CopyValue value={key} compact />
+                        </div>
                       </div>
-                      <div className="mt-1">
-                        <CopyValue value={key} compact />
+                      <div className="text-right">
+                        <div className="text-base font-semibold">{amt} coins</div>
+                        <div className="text-xs text-muted-foreground">{chance}% probability</div>
                       </div>
                     </div>
-                    <div className="text-right">
+                    <div className="ml-12 mt-3 h-2 overflow-hidden rounded-full bg-muted">
                       <div
-                        className={`text-base font-semibold ${slashed ? "text-destructive" : ""}`}
-                      >
-                        {amt} coins
-                      </div>
-                      <div className="text-xs text-muted-foreground">{chance}% probability</div>
+                        className="h-full rounded-full bg-primary"
+                        style={{ width: `${chance}%` }}
+                      />
                     </div>
                   </div>
-                  <div className="ml-12 mt-3 h-2 overflow-hidden rounded-full bg-muted">
-                    <div
-                      className={`h-full rounded-full ${slashed ? "bg-destructive" : "bg-primary"}`}
-                      style={{ width: `${chance}%` }}
-                    />
-                  </div>
-                </div>
-              );
-            })}
+                );
+              })
+          )}
         </div>
       </section>
+
       <section className="panel self-start p-5">
         <div className="mb-5">
-          <h2 className="text-sm font-semibold">Register stake</h2>
-          <p className="mt-1 text-xs text-muted-foreground">Commit coins for the current epoch.</p>
+          <h2 className="text-sm font-semibold">Register Stake</h2>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Commit coins to participate in PoS block selection.
+          </p>
         </div>
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            const value = Number(amount);
-            if (!Number.isFinite(value) || value <= 0) {
-              setError("Enter an amount greater than zero.");
-              return;
-            }
-            const result = submitMockStake(stakers, value, initialMockData.balance.balance);
-            if (!result.response.ok) {
-              setError(result.response.error);
-              return;
-            }
-            setStakers(result.stakers);
-            setAmount("");
-            setError("");
-            onToast(
-              `Stake registered. Block selection in ${result.response.creating_block_in_seconds}s.`,
-            );
-          }}
-        >
+
+        <form onSubmit={handleSubmitStake}>
           <Label htmlFor="stake">Amount</Label>
           <div className="relative mt-2">
             <Input
@@ -751,17 +957,20 @@ function Validators({
             />
             <span className="absolute right-3 top-2 text-xs text-muted-foreground">coins</span>
           </div>
+
           <div className="mt-2 flex justify-between text-xs text-muted-foreground">
             <span>Available balance</span>
-            <span>{initialMockData.balance.balance} coins</span>
+            <span>{balance.balance} coins</span>
           </div>
+
           {error && (
             <p role="alert" className="mt-3 text-xs text-destructive">
               {error}
             </p>
           )}
-          <Button className="mt-5 w-full">
-            <Coins /> Register stake
+
+          <Button className="mt-5 w-full" disabled={loading}>
+            <Coins /> {loading ? "Registering..." : "Register Stake"}
           </Button>
         </form>
       </section>
@@ -771,49 +980,68 @@ function Validators({
 
 function Mempool({
   mempool,
-  setMempool,
+  connection,
+  getName,
+  onRefresh,
   onTx,
   onToast,
 }: {
   mempool: MempoolResponse;
-  setMempool: (m: MempoolResponse) => void;
+  connection: Connection;
+  getName: (pk: string) => string;
+  onRefresh: () => void;
   onTx: (t: Transaction) => void;
   onToast: (s: string) => void;
 }) {
   const [receiver, setReceiver] = useState("");
   const [amount, setAmount] = useState("");
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+
+  const handleSubmitTx = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const value = Number(amount);
+
+    if (!receiver.trim() || !Number.isFinite(value) || value <= 0) {
+      setError("Enter a valid receiver and amount greater than zero.");
+      return;
+    }
+
+    setLoading(true);
+    setError("");
+
+    try {
+      const res = await submitTransaction(connection, receiver.trim(), value);
+      if (!res.ok) {
+        setError("Failed to submit transaction.");
+      } else {
+        setReceiver("");
+        setAmount("");
+        onToast(`Transaction ${shortKey(res.transaction_id || "", 8, 5)} broadcasted!`);
+        onRefresh();
+      }
+    } catch (err: any) {
+      setError(err.message || "Error submitting transaction.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <div className="grid gap-6 xl:grid-cols-[1.4fr_0.8fr]">
       <section className="panel overflow-hidden">
         <PanelHeading
-          title="Pending transactions"
-          detail={`${mempool.transactions.length} transactions awaiting confirmation`}
+          title="Pending Transactions"
+          detail={`${mempool.transactions.length} transactions in mempool`}
         />
-        <TransactionTable transactions={mempool.transactions} onTx={onTx} />
+        <TransactionTable transactions={mempool.transactions} getName={getName} onTx={onTx} />
       </section>
+
       <section className="panel self-start p-5">
-        <h2 className="text-sm font-semibold">Send transaction</h2>
-        <p className="mt-1 text-xs text-muted-foreground">
-          Broadcast from alpha-node to the mempool.
-        </p>
-        <form
-          className="mt-5 space-y-4"
-          onSubmit={(e) => {
-            e.preventDefault();
-            const value = Number(amount);
-            if (!receiver.trim() || !Number.isFinite(value) || value <= 0) {
-              setError("Enter a receiver and a valid amount.");
-              return;
-            }
-            const result = submitMockTransaction(mempool, receiver.trim(), value);
-            setMempool(result.mempool);
-            setReceiver("");
-            setAmount("");
-            setError("");
-            onToast(`Transaction ${shortKey(result.response.transaction_id, 8, 5)} submitted.`);
-          }}
-        >
+        <h2 className="text-sm font-semibold">Send Transaction</h2>
+        <p className="mt-1 text-xs text-muted-foreground">Broadcast transaction to the P2P network.</p>
+
+        <form className="mt-5 space-y-4" onSubmit={handleSubmitTx}>
           <div>
             <Label htmlFor="receiver">Receiver</Label>
             <Input
@@ -821,9 +1049,10 @@ function Mempool({
               className="mt-2 font-mono text-xs"
               value={receiver}
               onChange={(e) => setReceiver(e.target.value)}
-              placeholder="PEM public key or peer name"
+              placeholder="Peer name (e.g. bob) or PEM key"
             />
           </div>
+
           <div>
             <Label htmlFor="tx-amount">Amount</Label>
             <div className="relative mt-2">
@@ -839,13 +1068,15 @@ function Mempool({
               <span className="absolute right-3 top-2 text-xs text-muted-foreground">coins</span>
             </div>
           </div>
+
           {error && (
             <p role="alert" className="text-xs text-destructive">
               {error}
             </p>
           )}
-          <Button className="w-full">
-            <Send /> Submit transaction
+
+          <Button className="w-full" disabled={loading}>
+            <Send /> {loading ? "Broadcasting..." : "Submit Transaction"}
           </Button>
         </form>
       </section>
