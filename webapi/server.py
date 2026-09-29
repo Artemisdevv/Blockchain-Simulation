@@ -35,6 +35,13 @@ EPOCH_TIME = 60  # kept in sync with consensus/pos/p2p.py's EPOCH_TIME
 # malicious website open in someone's browser from silently calling this API.
 _ALLOWED_ORIGIN_PATTERN = r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$"
 
+
+def _cors_origins():
+    configured = os.environ.get("WEBAPI_CORS_ORIGINS", "").strip()
+    if not configured:
+        return _ALLOWED_ORIGIN_PATTERN
+    return [origin.strip() for origin in configured.split(",") if origin.strip()]
+
 MAX_REQUESTS_PER_MINUTE = 300
 MAX_AUTH_FAILURES = 5
 AUTH_FAILURE_WINDOW_SECONDS = 60
@@ -44,7 +51,7 @@ AUTH_BLOCK_SECONDS = 300
 def create_app(peer, loop, token, limiter: RateLimiter, auth_tracker: FailedAuthTracker):
     app = Flask(__name__)
     app.config["MAX_CONTENT_LENGTH"] = 16 * 1024  # reject oversized request bodies
-    CORS(app, origins=_ALLOWED_ORIGIN_PATTERN, supports_credentials=False)
+    CORS(app, origins=_cors_origins(), supports_credentials=False)
 
     @app.before_request
     def require_token():

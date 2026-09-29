@@ -12,6 +12,7 @@ import type {
 export interface Connection {
   url: string;
   token: string;
+  wsUrl?: string | undefined;
 }
 
 export async function apiRequest<T>(
@@ -162,13 +163,17 @@ export function connectEventsWs(
   handlers: WsEventHandlers,
 ): () => void {
   try {
-    const url = new URL(connection.url);
-    const wsProtocol = url.protocol === "https:" ? "wss:" : "ws:";
-    const restPort = url.port ? parseInt(url.port, 10) : 80;
-    const wsPort = restPort + 1;
-    const wsUrl = `${wsProtocol}//${url.hostname}:${wsPort}/events?token=${encodeURIComponent(
-      connection.token,
-    )}`;
+    const url = new URL(connection.wsUrl || connection.url);
+    if (!connection.wsUrl) {
+      const wsProtocol = url.protocol === "https:" ? "wss:" : "ws:";
+      const restPort = url.port ? parseInt(url.port, 10) : 80;
+      const wsPort = restPort + 1;
+      url.protocol = wsProtocol;
+      url.port = String(wsPort);
+      url.pathname = "/events";
+    }
+    url.searchParams.set("token", connection.token);
+    const wsUrl = url.toString();
 
     const ws = new WebSocket(wsUrl);
 

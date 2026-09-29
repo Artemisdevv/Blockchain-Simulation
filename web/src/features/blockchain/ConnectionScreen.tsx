@@ -6,9 +6,20 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { fetchBalance, type Connection } from "@/lib/api-client";
 
+const ALICE_CONNECTION: Connection = {
+  url: import.meta.env.VITE_ALICE_API_URL || "http://localhost:6001",
+  token: "demo-token-alice",
+  wsUrl: import.meta.env.VITE_ALICE_WS_URL || undefined,
+};
+const BOB_CONNECTION: Connection = {
+  url: import.meta.env.VITE_BOB_API_URL || "http://localhost:6011",
+  token: "demo-token-bob",
+  wsUrl: import.meta.env.VITE_BOB_WS_URL || undefined,
+};
+
 export function ConnectionScreen({ onConnect }: { onConnect: (connection: Connection) => void }) {
-  const [url, setUrl] = useState("http://localhost:6001");
-  const [token, setToken] = useState("demo-token-alice");
+  const [url, setUrl] = useState(ALICE_CONNECTION.url);
+  const [token, setToken] = useState(ALICE_CONNECTION.token);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [showQr, setShowQr] = useState(false);
@@ -33,7 +44,7 @@ export function ConnectionScreen({ onConnect }: { onConnect: (connection: Connec
     }
   }, [showQr, currentShareUrl]);
 
-  const handleConnect = async (targetUrl: string, targetToken: string) => {
+  const handleConnect = async (targetUrl: string, targetToken: string, wsUrl?: string) => {
     if (!targetUrl.trim() || !targetToken.trim()) {
       setError("Enter both the node API URL and Bearer token.");
       return;
@@ -43,7 +54,7 @@ export function ConnectionScreen({ onConnect }: { onConnect: (connection: Connec
     setError("");
 
     try {
-      const conn: Connection = { url: targetUrl.trim(), token: targetToken.trim() };
+      const conn: Connection = { url: targetUrl.trim(), token: targetToken.trim(), wsUrl };
       await fetchBalance(conn);
       onConnect(conn);
     } catch (err: any) {
@@ -134,9 +145,13 @@ export function ConnectionScreen({ onConnect }: { onConnect: (connection: Connec
                   type="button"
                   variant="default"
                   onClick={() => {
-                    setUrl("http://localhost:6001");
-                    setToken("demo-token-alice");
-                    handleConnect("http://localhost:6001", "demo-token-alice");
+                    setUrl(ALICE_CONNECTION.url);
+                    setToken(ALICE_CONNECTION.token);
+                    handleConnect(
+                      ALICE_CONNECTION.url,
+                      ALICE_CONNECTION.token,
+                      ALICE_CONNECTION.wsUrl,
+                    );
                   }}
                   className="flex items-center gap-2 shadow-md"
                 >
@@ -148,9 +163,13 @@ export function ConnectionScreen({ onConnect }: { onConnect: (connection: Connec
                   type="button"
                   variant="outline"
                   onClick={() => {
-                    setUrl("http://localhost:6011");
-                    setToken("demo-token-bob");
-                    handleConnect("http://localhost:6011", "demo-token-bob");
+                    setUrl(BOB_CONNECTION.url);
+                    setToken(BOB_CONNECTION.token);
+                    handleConnect(
+                      BOB_CONNECTION.url,
+                      BOB_CONNECTION.token,
+                      BOB_CONNECTION.wsUrl,
+                    );
                   }}
                   className="flex items-center gap-2"
                 >
