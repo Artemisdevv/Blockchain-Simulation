@@ -1,8 +1,8 @@
 # Web API Contract
 
 The web interface talks to a per-node API server that wraps a running `Peer`
-instance. **Implemented** in `webapi/server.py` (REST only — `/events`
-websocket below is still just a design sketch, not built yet).
+instance. **Implemented**: REST in `webapi/server.py`, push events in
+`webapi/events.py`.
 
 A Flask app runs in a background thread; anything that mutates Peer state or
 broadcasts a message is bridged onto the Peer's asyncio event loop via
@@ -101,11 +101,19 @@ Stake an amount for the current epoch (only valid on staker nodes).
 { "ok": false, "error": "..." }
 ```
 
-## WebSocket: `/events` — NOT YET IMPLEMENTED
+## WebSocket: `/events` — implemented
 
-Design sketch only. For now, poll `/chain`, `/peers`, `/mempool`, `/stakers`
-on an interval (e.g. every 2-3s) for live-ish updates. Server pushes below
-are the intended shape once someone builds this.
+Runs on a **separate port**: `api_port + 1` (e.g. REST on 6000 -> events on
+6001), because Flask's dev server doesn't speak websocket without extra
+dependencies. Implemented in `webapi/events.py`.
+
+**Connect:** `ws://host:6001/events?token=<token>` — same token as the REST
+API. Browsers can't set custom headers on a WebSocket handshake, so the
+token goes in the query string here instead of an `Authorization` header.
+Missing/wrong token closes the connection immediately with code `4401`.
+
+Server pushes JSON messages as node/chain state changes - no request/response,
+just keep the connection open and read:
 
 ```json
 { "type": "block_appended", "block": { /* same shape as /chain block */ } }
@@ -113,6 +121,9 @@ are the intended shape once someone builds this.
 { "type": "stake_registered", "staker": "pem", "amount": 10 }
 { "type": "node_slashed", "creator": "pem", "block_pos": 3 }
 ```
+
+Verified live: connected a websocket client, triggered `POST /stakes`,
+received the `stake_registered` event within milliseconds.
 
 `node_slashed` is the event to build the malicious-node-detection UI around —
 fired whenever `slash_creator` is set true on a block (see

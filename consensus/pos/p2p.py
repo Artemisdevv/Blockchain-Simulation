@@ -84,6 +84,9 @@ class Peer:
         self.seen_message_ids: Set[str]= set()
         # Used to remove duplicate messages, messages that return to us after a round of broadcasting
 
+        self.event_subscribers: Set[websockets.WebSocketServerProtocol] = set()
+        # Browser clients connected to the /events websocket (webapi/events.py)
+
         if activate_disk_load == "y":
             self.load_known_peers_from_disk()
         else:
@@ -397,6 +400,7 @@ class Peer:
                 if self.activate_disk_save == "y":
                     self.save_known_peers_to_disk()
                 self.name_to_public_key_dict[data['name'].lower()] = data['public_key']
+                asyncio.create_task(self.emit_event({"type": "peer_discovered", "peer": {"host": data['host'], "port": data['port'], "name": data['name'], "public_key": data['public_key']}}))
                 print(f"Registered peer {data['name']} {data['host']}:{data['port']}")
                 await self.send_known_peers(websocket)
 
@@ -426,6 +430,7 @@ class Peer:
                 if self.activate_disk_save == "y":
                     self.save_known_peers_to_disk()
                 self.name_to_public_key_dict[data["name"].lower()] = data["public_key"]
+                asyncio.create_task(self.emit_event({"type": "peer_discovered", "peer": {"host": data["host"], "port": data["port"], "name": data["name"], "public_key": data["public_key"]}}))
                 print(f"Registered peer {data['name']} {data['host']}:{data['port']}")
                 await self.send_known_peers(websocket)
                 pkt = {
@@ -456,6 +461,7 @@ class Peer:
                 if self.activate_disk_save == "y":
                     self.save_known_peers_to_disk()
                 self.name_to_public_key_dict[data["name"].lower()] = data["public_key"]
+                asyncio.create_task(self.emit_event({"type": "peer_discovered", "peer": {"host": data["host"], "port": data["port"], "name": data["name"], "public_key": data["public_key"]}}))
                 print(f"Registered peer {data['name']} {data['host']}:{data['port']}")
                 await self.broadcast_message(msg)
 
@@ -485,6 +491,7 @@ class Peer:
                     new_peer_found = True
                     self.known_peers[normalized_endpoint] = (peer['name'], peer['public_key'])
                     self.name_to_public_key_dict[peer['name'].lower()] = peer['public_key']
+                    asyncio.create_task(self.emit_event({"type": "peer_discovered", "peer": {"host": peer['host'], "port": peer['port'], "name": peer['name'], "public_key": peer['public_key']}}))
             if new_peer_found:
                 if self.activate_disk_save == "y":
                     self.save_known_peers_to_disk()
@@ -614,6 +621,7 @@ class Peer:
                     self.current_stakes.add(stake)
                     self.current_stakers[pid] = int(amt)
                     print(f"New stake : {pid}:{amt}")
+                asyncio.create_task(self.emit_event({"type": "stake_registered", "staker": pid, "amount": int(amt)}))
                 await self.broadcast_message(msg)
 
         elif t == "new_block":
@@ -757,6 +765,7 @@ class Peer:
 
             newBlock.creator = new_block_dict["creator"]
             Chain.instance.chain.append(newBlock)
+            asyncio.create_task(self.emit_event({"type": "block_appended", "block": newBlock.to_dict_with_stakers()}))
             print("\n\n Block Appended \n\n")
             self.last_epoch_end_ts = datetime.now()
 
@@ -839,6 +848,7 @@ class Peer:
                 print(f"\nBlock {pos} slashed\n")
                 Chain.instance.chain[pos].is_valid = False
                 Chain.instance.chain[pos].slash_creator = True
+                asyncio.create_task(self.emit_event({"type": "node_slashed", "creator": Chain.instance.chain[pos].creator, "block_pos": pos}))
                 await self.broadcast_message(msg)
 
             # Fork still exists but longest chain will win
@@ -944,7 +954,8 @@ class Peer:
         
         Chain.instance.chain[pos].is_valid=False
         Chain.instance.chain[pos].slash_creator=True
-        
+        asyncio.create_task(self.emit_event({"type": "node_slashed", "creator": Chain.instance.chain[pos].creator, "block_pos": pos}))
+
         pkt={
             "type":"slash_announcement",
             "id":str(uuid.uuid4()),
@@ -1002,6 +1013,25 @@ class Peer:
                     self.have_sent_peer_info.pop(ws, None)
                 await ws.close()
                 await ws.wait_closed()
+
+    async def emit_event(self, event: dict):
+        """
+            Pushes an event to every browser client connected to the
+            /events websocket (webapi/events.py). Best-effort and
+            fire-and-forget by design (always called via
+            asyncio.create_task, never awaited directly) - a bug or slow
+            client here must never affect consensus-critical code paths.
+        """
+        if not self.event_subscribers:
+            return
+        msg = json.dumps(event)
+        dead = set()
+        for ws in self.event_subscribers:
+            try:
+                await ws.send(msg)
+            except Exception:
+                dead.add(ws)
+        self.event_subscribers -= dead
 
     async def create_and_broadcast_tx(self, receiver_public_key, payload):
         """
@@ -1412,6 +1442,7 @@ class Peer:
             self.current_stakes.add(new_stake)
 
         self.staked_amt=amt
+        asyncio.create_task(self.emit_event({"type": "stake_registered", "staker": self.wallet.public_key_pem, "amount": amt}))
         print("Stake Created")
         await self.broadcast_message(pkt)
 
@@ -1551,6 +1582,7 @@ class Peer:
             }
 
             self.seen_message_ids.add(pkt["id"])
+            asyncio.create_task(self.emit_event({"type": "block_appended", "block": newBlock.to_dict_with_stakers()}))
             await self.broadcast_message(pkt)
             if self.activate_disk_save == "y":
                 self.save_chain_to_disk()

@@ -160,4 +160,4 @@ def run_api_server(peer, loop, http_port):
     print(f"\nWeb API listening on http://{host}:{http_port}")
     print(f"Auth token (also in {token_path}): {token}")
     print(f"Example: curl -H \"Authorization: Bearer {token}\" http://{host}:{http_port}/chain\n")
-    return thread
+    return thread, token

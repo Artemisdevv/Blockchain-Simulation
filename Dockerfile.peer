@@ -16,7 +16,16 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy application source
 COPY . .
 
-# Peer port
+# webapi/server.py binds to 127.0.0.1 by default (safe default for a bare
+# laptop) - inside a container that would make it unreachable even with the
+# port published, so opt in explicitly here. Container network isolation is
+# the actual trust boundary; the auth token still gates every request.
+ENV WEBAPI_HOST=0.0.0.0
+
+# Peer P2P port (set via PEER_PORT env var at runtime)
 EXPOSE 5000
+# Web API port is PEER_PORT+1000 (see webapi/server.py) - publish that too,
+# e.g. `-p 6000:6000` for a peer running with PEER_PORT=5000
+EXPOSE 6000
 
 CMD ["python", "start_peer.py"]

@@ -10,8 +10,10 @@ in the 2-3 minutes they'll actually watch.
    (`http://localhost:6000`) + the auth token printed when the peer starts.
    This is not a login system — it's just pointing the dashboard at your own
    local node. See `docs/API.md` for the auth header format.
-2. **Dashboard**, polling REST every 2-3s (`/events` websocket doesn't exist
-   yet — poll `/chain`, `/peers`, `/mempool`, `/stakers`):
+2. **Dashboard** — subscribe to `/events` (see `docs/API.md`) for live push
+   updates (`block_appended`, `peer_discovered`, `stake_registered`,
+   `node_slashed`); fall back to polling `/chain`, `/peers`, `/mempool`,
+   `/stakers` only if you need data `/events` doesn't cover:
    - Overview: my balance, epoch countdown, peer count
    - Chain explorer, live peer list, stakers panel, send-tx form, stake form
 

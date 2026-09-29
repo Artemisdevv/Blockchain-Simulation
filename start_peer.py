@@ -149,9 +149,6 @@ def start_peer():
     enable_api = (consensus == "pos" and not mal)
     api_port = port + 1000
 
-    enable_api = (consensus == "pos" and not mal)
-    api_port = port + 1000
-
     try:
         asyncio.run(run_peer(
             peer, action, bootstrap_host, bootstrap_port,
@@ -167,7 +164,11 @@ async def run_peer(peer, action, bootstrap_host, bootstrap_port,
                     enable_api, api_port):
     if enable_api:
         from webapi.server import run_api_server
-        run_api_server(peer, asyncio.get_running_loop(), api_port)
+        from webapi.events import run_events_server
+        loop = asyncio.get_running_loop()
+        _, token = run_api_server(peer, loop, api_port)
+        events_host = os.environ.get("WEBAPI_HOST", "127.0.0.1")
+        run_events_server(peer, events_host, api_port + 1, token)
 
     if action == "room":
         from signalling.client import join_room
