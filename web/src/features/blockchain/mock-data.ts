@@ -25,6 +25,9 @@ export interface Block {
   vrf_proof_b64: string;
   seed: string;
   sign: string;
+  /** False once the block was slashed by consensus (double-sign evidence). */
+  is_valid?: boolean;
+  slash_creator?: boolean;
 }
 export interface Peer {
   host: string;

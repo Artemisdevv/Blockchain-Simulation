@@ -215,6 +215,11 @@ def create_app(peer, loop, token, limiter: RateLimiter, auth_tracker: FailedAuth
             return jsonify({"blocks": []})
 
         blocks_dicts = Chain.instance.to_block_dict_list()
+        # Slashing is chain state, not a one-off event: expose it per block so every
+        # explorer (including late joiners and refreshes) shows a slashed block as such.
+        for block_dict, block in zip(blocks_dicts, Chain.instance.chain):
+            block_dict["is_valid"] = bool(block.is_valid)
+            block_dict["slash_creator"] = bool(block.slash_creator)
 
         # Support ?height=N or ?limit=N for Time-Travel Scrubber
         height = request.args.get("height", type=int)
