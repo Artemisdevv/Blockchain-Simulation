@@ -1,199 +1,152 @@
-# Blockchain App
-A web and terminal blockchain implementation in Python from scratch
+<div align="center">
 
-## Features
-- Peer-to-Peer network with decentralized communication
-- Public/private key-based account system
-- Digital signature verification
-- Selectable consensus mechanism - PoW, PoS, PoA
-- Smart contract deployment
-- IPFS integration
-- Persistent storage
-- Malicious node to test security
-- Command line & web interface
+<img src="./web/public/favicon.ico" alt="" height="64" />
 
-## Contents
-- [Theory](#theory)
-- [About this project](#about-this-project)
-- [How to run this project](#how-to-run-this-project)
+# Blockchain-Simulation
 
-## Theory
-### What is blockchain?
-A blockchain is a decentralized, distributed digital ledger where data is stored in blocks linked together in a chain
-- A block is made of list of transactions
-### Peer-to-Peer Network
-Since, there is no central authority, network is formed in a peer-to-peer fashion.
-### Consensus Mechanism
-Blockchain involves transactions in a trustless environment. So there is need for a mechanism to ensure integrity of the chain. There comes the need of consensus mechanisms. Each consensus mechanism ensures integrity of the chain in their own way.
-#### Proof of Work(PoW)
-- Nodes compete to solve a cryptographic puzzle
-- The winner gets to add the next block to the chain
-#### Proof of Stake(PoS)
-- Nodes run vrf to generate vrf output and vrf proof to simulate a lottery system
-- The winner of the lottery gets to generate the block.
-#### Proof of Authority(PoA)
-- A limited set of trusted nodes(authorities) validate and create new blocks
-### Smart Contracts
-- A smart contract is like a digital agreement written in code
-- It sits on the blockchain and runs automatically when certain rules are met
-### IPFS
-Blockchains are not designed for storing large amount of data. That's where IPFS comes in.
-- It's a decentralized file storage system
-- Each file is identified by its content
-- A unique hash called CID(Content Identifiers) is generated based on the content(Files with same content will have same CID)
-- IPFS uses a Distributed Hash Table(DHT), similar to BitTorrent's Kademlia DHT
-- When you request a CID, your node queries the DHT to ask "Which peers are providing this CID?"
-- Nodes that have previously announced that CID to the DHT will be returned as providers
-- Your node then directly connects to those providers via IPFS's peer-to-peer transport protocols(libp2p)
+A multi-node blockchain playground with pluggable consensus (PoW, PoA, PoS), malicious-peer scenarios, and a live web dashboard.
 
-## About this project
-### Basic Structure
-Each **node** contains its own set of
-- Known peers list (members of the network)
-- Client connections (connection established by your node to other nodes)
-- Server connections (connection established by other nodes to your node)
-- Wallet (acts as your account in the network)
-- Transaction pool (contains all transactions pending to be mined)
-- Chain (personal copy of the blockchain)
+[Overview](#overview) • [Quick start](#quick-start) • [Architecture](#architecture) • [Consensus modes](#consensus-modes) • [Development](#development) • [Documentation](#documentation)
 
-Each **account** contains
-- Private key
-- Public key
 
-**Transactions** are of 3 types
+## Overview
 
-- **Coin Transaction** - To transfer money
-  - Timestamp
-  - Public key of the sender
-  - Public key of the receiver
-  - Transaction amount
-- **Deploy Transaction** - To deploy contract
-  - Timestamp
-  - Public key of the sender
-  - Contract code
-  - Deploy charge
+Blockchain-Simulation runs a small network of peers in Docker and lets you watch how consensus behaves, including when a node misbehaves. Peers find each other through a lightweight signalling service, then exchange blocks and transactions directly. A web frontend and REST API expose the state of the network.
 
-- **Invoke Transaction** - To invoke contract
-  - Timestamp  
-  - Public key of the sender  
-  - Contract ID  
-  - Function name  
-  - Arguments  
-  - New state  
-  - Invoke charge  
+Highlights:
 
-Each **block** contains
-- Timestamp
-- List of transactions
-- Hash of previous block
-- Current block hash
-- Miner info
-- List of files
-### Handshake Protocol
-- Client: Sends ping
-- Server: Receives ping &rightarrow; sends pong
-- Client: Receives pong &rightarrow; Sends peer info (information about itself)
-- Server: Receives peer info &rightarrow; adds it to its known peers (if not already present) &rightarrow; sends back known_peers (list of all nodes it knows)
-- Client: Receives known_peers &rightarrow; adds new peers to its own known_peers &rightarrow; requests the chain
-- Server: Receives chain request &rightarrow; sends its current chain
-- Client: Receives the chain &rightarrow; replaces its own if the length of new chain is longer than the current one
-### Peer-to-Peer Network
-If the total number of nodes in the network is less than 10, it forms a mesh network. If the node count exceeds 9, Gossip-based Random Peer Sampling is used
-- Each node maintains a list of 8 connected peers
-- At regular intervals, a node drops one connection and connects to a new, previously unconnected peer from the known peers list
-- This prevents network congestion by limiting the number of connections per node
-- It also prevents sub-network formation by randomly switching connections  
+- **Three consensus implementations**: Proof of Work, Proof of Authority and Proof of Stake, each with its own P2P layer and malicious-node variant.
+- **Ready-made cast of peers**: Alice, Bob, a malicious Mallory, and a swarm of extra peers, managed by a peer manager.
+- **Signalling server for discovery**: peers register and discover each other without the server handling chain data.
+- **Web dashboard**: a TypeScript frontend on port `8080`, with spectator reports and rate-limited API access.
+- **Smart contracts**: sandboxed execution with a gas meter.
+- **Optional extras**: IPFS integration and persistent storage manager.
+- **Demo sharing**: included Windows and Linux/macOS launchers can start the network and expose the frontend through a temporary Cloudflare Quick Tunnel.
 
-**Implemented Using:** python websockets, asyncio
-### Consensus Mechanism
-Users can select their prefered consensus mechanism from the list of three available
-#### Proof of Work(PoW)
-- A new block is mined every 30 secs, if there are pending transactions in the transaction pool
-- Mining nodes collect transactions into a block
-- Node that first finds a valid hash gets the chance to mine
-- Difficulty is set to 5. That means, a valid hash is the one which starts with five zeroes
-- Nonce is incremented until finding a valid hash
-- Once mined, the block is broadcasted to the network
-- All nodes validate the block before adding it to their chain
-#### Proof of Stake(PoS)
-- One node is mined every epoch
-- The timings are synchronized between peers based on the time since last block was created
-- Each node can stake a certain amount of their cryptocurrency in order to run vrf.
-- VRF is a verifiable random function. The stakers generate a vrf proof and vrf output
-- If the vrf output generated by a node is less than (max value of vrf output) * (amount staked by this node/total amount staked by all nodes), then
-- This node wins the lottery and create a block. (Notice that the greater the amount staked the greater the chance of winning the lottery)
-- VRF Proof is used to check whether the one who claims to win the lottery actually generated the vrf output from the correct seed
-- If node attempts double signing their stake is slashed.
-- If multiple nodes win and creates blocks then the chain is forked.
-- We use the heaviest chain rule to arrive at a consensus. (i.e the chain with the most amount staked is the valid chain)
-#### Proof of Authority(PoA)
-- Initially, admin, the one who started the chain is the only miner
-- Admin can add or remove miners
-- Each block can be mined only by the assigned miner
-- If that miner is inactive, mining will be handed over to the next miner
-### Smart Contracts
-In this project
-- Smart Contracts are written in python
-- Users can write their own smart contracts and deploy
-- Users can also invoke the deployed contract using their deployed address
-- They run inside a sandboxed environment with time limit, memory limit and operation limit  
 
-**Implemented Using:** RestrictedPython, multiprocessing
-### IPFS
-IPFS is integrated as a wrapper for the existing IPFS network. IPFS hashes of the user uploaded files are stored in the blocks. Other users can use this to download the file.  
-
-**Implemented Using:** IPFS
-### Persistent Storage
-Persistent storage is implemented to enable nodes to reconnect to the network using there previous network data
-### Malicious Node
-- To test the security and robustness of our networks we created a malicious node that attempts
-    1. Generate invalid transactions (amt>account balance or amount<=0)
-    2. Double Sign
-- We have tested our blockchain networks using this malicious nodes to verify that our protocols are working and that our network is functional
-
-## How to run this project
-
-**Quickest path (Docker + web dashboard):** `docker compose up -d --build`
-for the network, then `cd web && npm install && npm run dev` for the dashboard.
-In the browser, click **"Connect to Peer Alice (:6001)"** or scan the **Spectator QR Code** for 1-click zero-friction access.
+## Quick start
 
 ### Prerequisites
-- `python 3.10+`
-- `pip` (python package manager)
-- `venv` (for creating virtual environment)
-### Installation & Setup
-Clone project into your local machine
-```bash
-git clone https://github.com/Rahan-M/BlockChain_Prototype.git
+
+- Docker Desktop with Docker Compose enabled
+- Git
+- Python 3.x (only needed to run tests or peers outside Docker)
+
+### Run the demo
+
+#### Windows
+
+```powershell
+.\launchers\demo.ps1
 ```
-Enter into the project folder
+
+This builds and starts the complete Docker demo stack, waits for the services to become ready, starts the Cloudflare Quick Tunnel, and opens a separate terminal window displaying the public demo URL. The original terminal continues following Docker Compose logs. Ctrl+Click the URL in the new window to open the demo.
+
+#### Linux / macOS
+
 ```bash
-cd BlockChain_Prototype
+chmod +x launchers/demo.sh
+./launchers/demo.sh
 ```
-Create and activate virtual environment
+
+This starts the same Docker demo stack and prints the public Cloudflare Quick Tunnel URL in the current terminal.
+
+The generated Cloudflare URL is temporary and is intended for sharing or presenting a running demo. Cloudflare account credentials, API tokens, and tunnel configuration are not required.
+
+### Run locally using localhost
+
 ```bash
-python -m venv venv
-venv\Scripts\activate
+cp .env.example .env   # adjust values if needed
+docker compose up -d
 ```
-Install dependencies
+
+Open the frontend at:
+
+`http://localhost:8080/`
+
+The frontend is available locally without using the public URL. The current default Compose configuration also starts `cloudflared` in the background; the tunnel is not required for local access.
+
+Once the containers are up:
+
+The `peer-*` services below are enabled by the `demo` profile, which both demo launchers activate.
+
+| Service | Port | Purpose |
+|---|---|---|
+| `frontend` | 8080 | Web dashboard |
+| `signalling` | 7000 | Peer discovery |
+| `peer-alice`, `peer-bob` | 6000 (inside the network) | Honest peers |
+| `peer-mallory` | n/a | Malicious peer for attack scenarios |
+| `peer-swarm` | n/a | Extra peers to grow the network |
+| `peer-manager` | n/a | Starts and manages peers |
+| `cloudflared` | n/a | Public tunnel to the frontend |
+
+> [!TIP]
+> Stop and remove everything with `docker compose down`. See [docs/DOCKER.md](docs/DOCKER.md) for container details.
+
+## Architecture
+
+```text
+            ┌────────────┐   register / discover   ┌────────────┐
+            │  frontend  │                         │ signalling │
+            │  (web/)    │                         │  :7000     │
+            └─────┬──────┘                         └─────┬──────┘
+                  │ REST / events                        │
+            ┌─────▼──────┐        direct P2P       ┌─────▼──────┐
+            │   webapi   │◄───────────────────────►│   peers    │
+            │            │                         │ alice, bob │
+            └────────────┘                         │ mallory... │
+                                                   └────────────┘
+```
+
+## Repository layout
+
+```text
+consensus/        PoW, PoA and PoS implementations (chain structures, P2P, malicious nodes)
+signalling/       Signalling server, client and healthcheck
+webapi/           Flask API: events, rate limiting, healthcheck
+smart_contract/   Contract storage, gas metering and sandboxed execution
+storage/          Storage manager
+ipfs/             IPFS helper
+web/              Frontend (TypeScript, Vite)
+tests/            Test suite
+docs/             API, Docker and frontend UX docs
+peer_manager.py   Peer lifecycle management
+start_peer.py     Peer entry point
+launchers/        One-command demo launchers for Windows and Linux/macOS
+```
+
+## Consensus modes
+
+| Mode | Directory | Notes |
+|---|---|---|
+| Proof of Work | `consensus/pow/` | Nodes compete to produce blocks |
+| Proof of Authority | `consensus/poa/` | Approved validators produce blocks |
+| Proof of Stake | `consensus/pos/` | Validators are chosen based on stake; includes a `malicious_peer.py` for attack scenarios |
+
+Each mode ships a `mal_node.py` so you can observe how the network reacts to a faulty or hostile participant.
+
+## Development
+
+Install dependencies and run the tests:
+
 ```bash
 pip install -r requirements.txt
+pip install -r requirements-dev.txt
+pytest tests/
 ```
-### Terminal App
-Start terminal app
+
+The test suite covers, among other things, PoS bug fixes, election details, staking, genesis balances, empty blocks, the peer manager, rate limiting and spectator reports.
+
+To work on the frontend:
+
 ```bash
-python start_peer.py
+cd web
+npm install
+npm run dev
 ```
 
-sample:
-  host: localhost
-  port: 5000
-  name: john
+## Documentation
 
-## Authors
-
-**Rahan M**
-[GitHub](https://github.com/Rahan-M) | [LinkedIn](https://www.linkedin.com/in/rahan-m-077a32254?utm_source=share&utm_campaign=share_via&utm_content=profile&utm_medium=android_app)
-
-**Jefin Joji**
-[GitHub](https://github.com/JefinCodes) | [LinkedIn](https://www.linkedin.com/in/jefin-joji-659354313?utm_source=share&utm_campaign=share_via&utm_content=profile&utm_medium=android_app)
+- [API reference](docs/API.md)
+- [Docker setup](docs/DOCKER.md)
+- [Frontend UX notes](docs/FRONTEND_UX.md)
