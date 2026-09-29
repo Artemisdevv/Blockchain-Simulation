@@ -106,7 +106,7 @@ export function ConnectionScreen({ onConnect }: { onConnect: (connection: Connec
           waveAmplitude={1}
           particleSize={isMobile ? 0.75 : 1.2}
           lerpSpeed={0.01}
-          color="#dddddd"
+          color="#c3c3c3"
           autoAnimate={false}
           particleVariance={0.4}
           rotationSpeed={0}
