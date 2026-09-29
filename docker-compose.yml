@@ -8,9 +8,12 @@ services:
     ports:
       - "7000:7000"
     healthcheck:
-      test: ["CMD", "python", "-c", "import socket; socket.create_connection(('localhost', 7000), timeout=2)"]
+      # A bare TCP connect (what this used to be) makes the websockets
+      # server log a spurious "invalid HTTP request" error on every probe -
+      # see signalling/healthcheck.py for why.
+      test: ["CMD", "python", "-m", "signalling.healthcheck"]
       interval: 3s
-      timeout: 2s
+      timeout: 3s
       retries: 10
       start_period: 5s
 
