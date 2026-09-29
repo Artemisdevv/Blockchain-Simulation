@@ -701,9 +701,22 @@ class Peer:
                 return
 
             if not Chain.instance.isValidBlock(newBlock):
+                # A second, different block on the same parent from the creator of our tip
+                # is direct double-sign evidence (equivocation): both blocks are signed by
+                # the same key, so slash right away instead of waiting for a chain exchange.
+                tip = Chain.instance.lastBlock
+                if (len(Chain.instance.chain) > 1 and tip.creator and tip.creator == newBlock.creator
+                        and tip.prevHash == newBlock.prevHash and not tip.is_equal(newBlock)):
+                    try:
+                        newBlock.sign = base64.b64decode(sign_str)
+                    except Exception:
+                        return
+                    print("\nConflicting block from the same creator - checking for double-sign\n")
+                    await self.verify_and_slash(tip, newBlock, len(Chain.instance.chain) - 1, [])
+                    return
                 print("\nInvalid Block\n")
                 return
-            
+
             try:
                 # Convert Unix timestamp to datetime
                 if isinstance(newBlock.ts, (int, float)):
