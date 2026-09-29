@@ -1,23 +1,15 @@
-import { useState, useEffect, useRef } from "react";
-import { ArrowRight, CircleCheck, Database, Loader2, LockKeyhole, Network, QrCode, Settings2, Copy, Check } from "lucide-react";
-import QRCode from "qrcode";
+import { useState } from "react";
+import { ArrowRight, CircleCheck, Database, Loader2, LockKeyhole, Network, Settings2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { createSpectatorLink, fetchBalance, startRoomPeer, type Connection } from "@/lib/api-client";
-import { NODE_REGISTRY } from "@/lib/node-registry";
-
-const KNOWN_NAMES = Object.keys(NODE_REGISTRY);
+import { fetchBalance, startRoomPeer, type Connection } from "@/lib/api-client";
 
 export function ConnectionScreen({ onConnect }: { onConnect: (connection: Connection) => void }) {
   const [name, setName] = useState("");
   const [roomId, setRoomId] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [showQr, setShowQr] = useState(false);
-  const [copied, setCopied] = useState(false);
-  const [spectatorShareUrl, setSpectatorShareUrl] = useState("");
-  const qrCanvasRef = useRef<HTMLCanvasElement | null>(null);
 
   // Advanced/custom connection, for spectators or non-standard deployments
   // that aren't in NODE_REGISTRY. Hidden by default - the primary flow only
@@ -26,30 +18,6 @@ export function ConnectionScreen({ onConnect }: { onConnect: (connection: Connec
   const [advUrl, setAdvUrl] = useState("");
   const [advToken, setAdvToken] = useState("");
   const [advWsUrl, setAdvWsUrl] = useState("");
-
-  const trimmedName = name.trim().toLowerCase();
-  const shareUrl = new URL(window.location.origin);
-  if (KNOWN_NAMES.includes(trimmedName)) {
-    shareUrl.searchParams.set("node", trimmedName);
-  } else if (advUrl.trim() && advToken.trim()) {
-    shareUrl.searchParams.set("url", advUrl.trim());
-    shareUrl.searchParams.set("token", advToken.trim());
-    if (advWsUrl.trim()) shareUrl.searchParams.set("wsUrl", advWsUrl.trim());
-  }
-  const currentShareUrl = spectatorShareUrl || shareUrl.toString();
-
-  useEffect(() => {
-    if (showQr && qrCanvasRef.current) {
-      QRCode.toCanvas(qrCanvasRef.current, currentShareUrl, {
-        width: 180,
-        margin: 2,
-        color: {
-          dark: "#0f172a",
-          light: "#ffffff",
-        },
-      }).catch((err) => console.error("Error generating QR:", err));
-    }
-  }, [showQr, currentShareUrl]);
 
   const connectWith = async (conn: Connection) => {
     setLoading(true);
@@ -111,29 +79,6 @@ export function ConnectionScreen({ onConnect }: { onConnect: (connection: Connec
     });
   };
 
-  const copyShareUrl = () => {
-    navigator.clipboard.writeText(currentShareUrl);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
-
-  const toggleSpectatorQr = async () => {
-    if (showQr) {
-      setShowQr(false);
-      return;
-    }
-    setLoading(true);
-    setError("");
-    try {
-      setSpectatorShareUrl(await createSpectatorLink(roomId.trim() || "demo"));
-      setShowQr(true);
-    } catch (err: any) {
-      setError(err.message || "Could not create a spectator link for this room.");
-    } finally {
-      setLoading(false);
-    }
-  };
-
   return (
     <main className="min-h-screen bg-background px-5 py-10 sm:px-8 lg:px-12">
       <div className="mx-auto flex min-h-[calc(100vh-5rem)] max-w-6xl flex-col justify-between">
@@ -148,42 +93,8 @@ export function ConnectionScreen({ onConnect }: { onConnect: (connection: Connec
             </div>
           </div>
 
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => void toggleSpectatorQr()}
-            disabled={loading}
-            className="flex items-center gap-2"
-          >
-            <QrCode className="h-4 w-4 text-primary" />
-            Spectator QR Code
-          </Button>
         </header>
 
-        {showQr && (
-          <div className="my-6 flex flex-col items-center gap-4 rounded-xl border border-primary/30 bg-card p-6 shadow-xl sm:flex-row">
-            <div className="rounded-lg bg-white p-2 shadow-inner">
-              <canvas ref={qrCanvasRef} />
-            </div>
-            <div className="min-w-0 flex-1 space-y-2">
-              <div className="text-sm font-semibold text-foreground">Spectator QR & Direct Link</div>
-              <p className="text-xs leading-relaxed text-muted-foreground">
-                Scan this QR code or copy the link below to open the dashboard live on your mobile device or secondary browser. Automatically connects in Spectator mode!
-              </p>
-              <div className="flex items-center gap-2 pt-2">
-                <Input
-                  readOnly
-                  value={currentShareUrl}
-                  className="font-mono text-xs bg-muted text-muted-foreground"
-                />
-                <Button variant="secondary" size="sm" onClick={copyShareUrl} className="shrink-0">
-                  {copied ? <Check className="h-4 w-4 text-success" /> : <Copy className="h-4 w-4" />}
-                  {copied ? "Copied" : "Copy"}
-                </Button>
-              </div>
-            </div>
-          </div>
-        )}
 
         <section className="grid items-center gap-14 py-12 lg:grid-cols-[1fr_440px]">
           <div className="max-w-2xl">
@@ -245,8 +156,6 @@ export function ConnectionScreen({ onConnect }: { onConnect: (connection: Connec
                   value={roomId}
                   onChange={(e) => {
                     setRoomId(e.target.value);
-                    setSpectatorShareUrl("");
-                    setShowQr(false);
                   }}
                   placeholder="demo"
                 />

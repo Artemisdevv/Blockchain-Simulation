@@ -90,17 +90,17 @@ export async function listManagedPeers(): Promise<ManagedPeerSummary[]> {
   return data.peers;
 }
 
-export async function createSpectatorLink(roomId: string): Promise<string> {
+/** Read-only link for the room `peerToken` belongs to; the server derives the room from the token. */
+export async function createSpectatorLink(peerToken: string): Promise<string> {
   const response = await fetch("/api/peer-setup/spectator-links", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ room_id: roomId }),
+    headers: { Authorization: `Bearer ${peerToken}` },
   });
   const data = await response.json();
   if (!response.ok) throw new Error(data?.error || `Unable to create spectator link (HTTP ${response.status}).`);
   const url = new URL(window.location.origin);
   url.searchParams.set("mode", "spectator");
-  url.searchParams.set("room", roomId);
+  url.searchParams.set("room", data.room_id);
   url.searchParams.set("spectatorToken", data.spectator_token);
   return url.toString();
 }

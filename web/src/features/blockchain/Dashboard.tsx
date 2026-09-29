@@ -28,6 +28,7 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { BlockDialog, TransactionDialog } from "./DetailDialog";
 import { CopyValue, formatTime, normKey, shortKey } from "./utils";
+import { SpectatorShare } from "./SpectatorShare";
 import {
   connectEventsWs,
   fetchAttackLabState,
@@ -366,6 +367,7 @@ export function Dashboard({
                 </Button>}
                 {!isSpectator && (
                   <>
+                    <SpectatorShare connection={connection} onToast={setToast} />
                     {autoStake.available && (
                       <label className="flex items-center gap-2 rounded-md border border-border bg-card px-3 py-2 text-sm">
                         <Switch checked={autoStake.enabled} onCheckedChange={toggleAutoStake} />
