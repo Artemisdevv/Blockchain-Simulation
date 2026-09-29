@@ -19,10 +19,13 @@ export function ElectionExplainer({
   stakers,
   getName,
   selfPk,
+  lastBlock,
 }: {
   stakers: StakersResponse;
   getName: (pk: string) => string;
   selfPk: string;
+  /** Newest block: who won the previous epoch's draw and whether they were slashed for it. */
+  lastBlock?: { height: number; creator: string; slashed: boolean } | undefined;
 }) {
   const election = stakers.election;
   const empty = !election || election.total <= 0 || election.pick === null;
@@ -40,6 +43,19 @@ export function ElectionExplainer({
           </p>
         </div>
       </div>
+
+      {lastBlock && (
+        <div className="flex flex-wrap items-center gap-2 border-b border-border bg-muted/30 px-6 py-3 text-sm">
+          <span className="text-muted-foreground">Last epoch&apos;s winner:</span>
+          <span className="font-semibold">
+            {lastBlock.creator === selfPk ? "You" : getName(lastBlock.creator)}
+          </span>
+          <span className="text-muted-foreground">built block #{lastBlock.height}</span>
+          {lastBlock.slashed && (
+            <span className="status status-danger">Slashed for double-signing</span>
+          )}
+        </div>
+      )}
 
       {empty ? (
         <div className="p-6 text-center text-xs text-muted-foreground">

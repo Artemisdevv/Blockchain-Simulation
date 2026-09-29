@@ -494,6 +494,17 @@ export function Dashboard({
                 onRefresh={refreshAll}
                 onToast={setToast}
                 readOnly={isSpectator}
+                lastBlock={
+                  chain.blocks.length > 1
+                    ? {
+                        height: chain.blocks.length,
+                        creator: chain.blocks[chain.blocks.length - 1]!.creator,
+                        slashed:
+                          chain.blocks[chain.blocks.length - 1]!.slash_creator === true ||
+                          chain.blocks[chain.blocks.length - 1]!.is_valid === false,
+                      }
+                    : undefined
+                }
               />
             )}
             {view === "mempool" && (
@@ -1279,6 +1290,7 @@ function Validators({
   onRefresh,
   onToast,
   readOnly,
+  lastBlock,
 }: {
   stakers: StakersResponse;
   balance: BalanceResponse;
@@ -1288,6 +1300,8 @@ function Validators({
   onRefresh: () => void;
   onToast: (s: string) => void;
   readOnly: boolean;
+  /** Newest block: whose turn it was last epoch, and whether it was slashed. */
+  lastBlock?: { height: number; creator: string; slashed: boolean } | undefined;
 }) {
   const [amount, setAmount] = useState("");
   const [loading, setLoading] = useState(false);
@@ -1424,7 +1438,12 @@ function Validators({
         </form>
       </section>}
       <div className="xl:col-span-2">
-        <ElectionExplainer stakers={stakers} getName={getName} selfPk={balance.public_key} />
+        <ElectionExplainer
+          stakers={stakers}
+          getName={getName}
+          selfPk={balance.public_key}
+          lastBlock={lastBlock}
+        />
       </div>
     </div>
   );
