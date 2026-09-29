@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { fetchBalance, startRoomPeer, type Connection } from "@/lib/api-client";
-import { NODE_REGISTRY, resolveNodeByName } from "@/lib/node-registry";
+import { NODE_REGISTRY } from "@/lib/node-registry";
 
 const KNOWN_NAMES = Object.keys(NODE_REGISTRY);
 
@@ -246,26 +246,6 @@ export function ConnectionScreen({ onConnect }: { onConnect: (connection: Connec
                 )}
               </Button>
 
-              <div className="border-t border-border pt-4">
-                <p className="mb-2 text-xs text-muted-foreground">Connect to an existing demo peer:</p>
-                <div className="flex gap-2">
-                  {KNOWN_NAMES.map((nodeName) => (
-                    <Button
-                      key={nodeName}
-                      type="button"
-                      size="sm"
-                      variant="outline"
-                      disabled={loading}
-                      onClick={() => {
-                        const connection = resolveNodeByName(nodeName);
-                        if (connection) void connectWith(connection);
-                      }}
-                    >
-                      {nodeName}
-                    </Button>
-                  ))}
-                </div>
-              </div>
             </div>
 
             <div className="mt-5 border-t border-border pt-4">

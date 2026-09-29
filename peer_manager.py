@@ -26,6 +26,8 @@ import websockets
 BASE_PORT = int(os.environ.get("PEER_MANAGER_BASE_PORT", "5100"))
 PORT_STEP = int(os.environ.get("PEER_MANAGER_PORT_STEP", "100"))
 MAX_PEERS = int(os.environ.get("PEER_MANAGER_MAX_PEERS", "9"))
+# Peers whose dashboard has not touched the API for this long are stopped.
+IDLE_TIMEOUT = float(os.environ.get("PEER_MANAGER_IDLE_TIMEOUT", "120"))
 PEER_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,31}$")
 ROOM_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
 PROJECT_ROOT = Path(__file__).resolve().parent
@@ -39,6 +41,7 @@ class ManagedPeer:
     port: int
     token: str
     process: subprocess.Popen
+    last_seen: float = 0.0
 
 
 class PeerManager:
@@ -48,6 +51,7 @@ class PeerManager:
         self.peers: dict[str, ManagedPeer] = {}
         self._lock = threading.Lock()
         self._next_port = BASE_PORT
+        self._free_ports: list[int] = []
 
     def start_peer(self, name, room_id):
         name = str(name or "").strip()
@@ -64,8 +68,11 @@ class PeerManager:
             if any(peer.name.lower() == name.lower() for peer in self.peers.values()):
                 raise ValueError(f"A managed peer named '{name}' is already running.")
 
-            port = self._next_port
-            self._next_port += PORT_STEP
+            if self._free_ports:
+                port = self._free_ports.pop(0)
+            else:
+                port = self._next_port
+                self._next_port += PORT_STEP
             peer_id = uuid.uuid4().hex
             token = secrets.token_urlsafe(32)
             env = os.environ.copy()
@@ -83,6 +90,7 @@ class PeerManager:
                 "ROOM_ID": room_id,
                 "MALICIOUS": "n",
                 "STAKER": "y",
+                "AUTO_STAKE": "true",
                 "WEBAPI_HOST": "0.0.0.0",
                 "WEBAPI_TOKEN": token,
             })
@@ -91,7 +99,7 @@ class PeerManager:
                 cwd=str(PROJECT_ROOT),
                 env=env,
             )
-            managed = ManagedPeer(peer_id, name, room_id, port, token, process)
+            managed = ManagedPeer(peer_id, name, room_id, port, token, process, time.monotonic())
             self.peers[peer_id] = managed
 
         if not self._wait_for_api(managed):
@@ -118,28 +126,48 @@ class PeerManager:
             time.sleep(0.1)
         return False
 
+    def _release(self, peer):
+        self.peers.pop(peer.peer_id, None)
+        if peer.port not in self._free_ports:
+            self._free_ports.append(peer.port)
+
     def _reap_exited(self):
-        for peer_id, peer in list(self.peers.items()):
+        now = time.monotonic()
+        for peer in list(self.peers.values()):
             if peer.process.poll() is not None:
-                self.peers.pop(peer_id, None)
+                self._release(peer)
+            elif now - peer.last_seen > IDLE_TIMEOUT:
+                # Dashboard went away without disconnecting (tab closed, crash).
+                self._release(peer)
+                self._terminate(peer)
 
-    def get_peer(self, peer_id):
-        with self._lock:
-            peer = self.peers.get(peer_id)
-            if peer and peer.process.poll() is not None:
-                self.peers.pop(peer_id, None)
-                return None
-            return peer
-
-    def stop_peer(self, peer_id):
-        with self._lock:
-            peer = self.peers.pop(peer_id, None)
-        if peer and peer.process.poll() is None:
+    @staticmethod
+    def _terminate(peer):
+        if peer.process.poll() is None:
             peer.process.terminate()
             try:
                 peer.process.wait(timeout=5)
             except subprocess.TimeoutExpired:
                 peer.process.kill()
+
+    def get_peer(self, peer_id):
+        with self._lock:
+            peer = self.peers.get(peer_id)
+            if peer and peer.process.poll() is not None:
+                self._release(peer)
+                return None
+            if peer:
+                peer.last_seen = time.monotonic()
+            return peer
+
+    def stop_peer(self, peer_id):
+        with self._lock:
+            peer = self.peers.get(peer_id)
+            if peer:
+                self._release(peer)
+        if peer:
+            self._terminate(peer)
+        return peer
 
     def stop_all(self):
         with self._lock:
@@ -167,6 +195,16 @@ def create_app(manager=None):
             "room_id": peer.room_id,
             "token": peer.token,
         }), 201
+
+    @app.delete("/peers/<peer_id>")
+    def delete_peer(peer_id):
+        peer = manager.get_peer(peer_id)
+        if not peer:
+            return jsonify({"error": "Peer is no longer running."}), 404
+        if request.headers.get("Authorization") != f"Bearer {peer.token}":
+            return jsonify({"error": "Invalid token."}), 401
+        manager.stop_peer(peer_id)
+        return jsonify({"stopped": peer_id}), 200
 
     @app.route("/api/runtime/<peer_id>", defaults={"path": ""}, methods=["GET", "POST", "OPTIONS"])
     @app.route("/api/runtime/<peer_id>/<path:path>", methods=["GET", "POST", "OPTIONS"])
@@ -215,6 +253,7 @@ async def run_ws_proxy(manager, websocket):
         ) as upstream:
             async def relay(source, target):
                 async for message in source:
+                    peer.last_seen = time.monotonic()
                     await target.send(message)
 
             tasks = [

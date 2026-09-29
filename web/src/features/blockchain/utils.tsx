@@ -2,8 +2,22 @@ import { Check, Copy } from "lucide-react";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 
-export const shortKey = (value: string, left = 10, right = 7) =>
-  `${value.replaceAll("\n", "").slice(0, left)}…${value.replaceAll("\n", "").slice(-right)}`;
+// Every SECP256k1 SPKI public key starts with the same 32 base64 chars of DER
+// header, so the distinguishing part is what follows.
+const DER_HEADER_LEN = 32;
+
+export const normKey = (value: string) => value.replace(/\s+/g, "");
+
+export const shortKey = (value: string, left = 10, right = 7) => {
+  if (!value) return "";
+  const clean = value
+    .replace(/-----BEGIN [^-]+-----/g, "")
+    .replace(/-----END [^-]+-----/g, "")
+    .replace(/\s+/g, "");
+  if (clean.length === 0) return value.slice(0, left);
+  const body = clean.length > DER_HEADER_LEN + left + right ? clean.slice(DER_HEADER_LEN) : clean;
+  return `${body.slice(0, left)}…${body.slice(-right)}`;
+};
 export const formatTime = (value: number) =>
   new Intl.DateTimeFormat("en", { hour: "2-digit", minute: "2-digit", second: "2-digit" }).format(
     new Date(value > 1e12 ? value : value * 1000),

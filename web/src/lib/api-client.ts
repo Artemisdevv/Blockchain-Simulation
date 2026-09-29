@@ -46,6 +46,24 @@ export async function startRoomPeer(config: RoomPeerRequest): Promise<RoomPeerRe
   return response.json() as Promise<RoomPeerResponse>;
 }
 
+/**
+ * Stop the peer process the manager started for this connection. No-op for
+ * connections that were not created through the peer manager (demo peers,
+ * spectator URLs). Never throws: disconnecting must always succeed locally.
+ */
+export async function stopRoomPeer(connection: Connection): Promise<void> {
+  const match = /^\/api\/runtime\/([0-9a-f]+)$/.exec(connection.url);
+  if (!match) return;
+  try {
+    await fetch(`/api/peer-setup/peers/${match[1]}`, {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${connection.token}` },
+    });
+  } catch {
+    // Manager unreachable; its idle reaper will stop the peer.
+  }
+}
+
 export async function apiRequest<T>(
   connection: Connection,
   path: string,
@@ -179,9 +197,29 @@ export async function requestFaucet(
   });
 }
 
+export interface AutoStakeResponse {
+  enabled: boolean;
+  available: boolean;
+}
+
+export async function fetchAutoStake(connection: Connection): Promise<AutoStakeResponse> {
+  return apiRequest<AutoStakeResponse>(connection, "/auto_stake");
+}
+
+export async function setAutoStake(
+  connection: Connection,
+  enabled: boolean,
+): Promise<AutoStakeResponse> {
+  return apiRequest<AutoStakeResponse>(connection, "/auto_stake", {
+    method: "POST",
+    body: JSON.stringify({ enabled }),
+  });
+}
+
 export interface WsEventHandlers {
   onBlockAppended?: (block: any) => void;
   onPeerDiscovered?: (peer: any) => void;
+  onPeerLeft?: (peer: any) => void;
   onStakeRegistered?: (data: { staker: string; amount: number }) => void;
   onNodeSlashed?: (event: NodeSlashedEvent) => void;
   onOpen?: () => void;
@@ -233,6 +271,9 @@ export function connectEventsWs(
             break;
           case "peer_discovered":
             handlers.onPeerDiscovered?.(data.peer);
+            break;
+          case "peer_left":
+            handlers.onPeerLeft?.(data.peer);
             break;
           case "stake_registered":
             handlers.onStakeRegistered?.(data);

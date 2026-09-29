@@ -2,7 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { ConnectionScreen } from "@/features/blockchain/ConnectionScreen";
 import { Dashboard } from "@/features/blockchain/Dashboard";
-import type { Connection } from "@/lib/api-client";
+import { stopRoomPeer, type Connection } from "@/lib/api-client";
 import { resolveNodeByName } from "@/lib/node-registry";
 
 export const Route = createFileRoute("/")({
@@ -82,6 +82,7 @@ function Index() {
     <Dashboard
       connection={connection}
       onDisconnect={() => {
+        void stopRoomPeer(connection);
         window.localStorage.removeItem("consensus-console-connection");
         setConnection(null);
       }}

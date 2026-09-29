@@ -64,6 +64,7 @@ class Peer:
         self.host = host
         self.name = name
         self.staker=staker
+        self.auto_stake=False # toggled via webapi /auto_stake; see auto_stake_loop
 
         self.activate_disk_save = activate_disk_save
 
@@ -1527,6 +1528,73 @@ class Peer:
         asyncio.create_task(self.create_blocks(time_left))
         return {"ok": True, "creating_block_in_seconds": time_left}
 
+    def build_faucet_tx(self, amount):
+        """
+            Faucet mint to this node. "Genesis" isn't a real keypair - it is
+            signed with the well-known faucet key so peers can verify it
+            (see FAUCET_SIGNING_KEY's docstring).
+        """
+        from shared_blockchain_structures import FAUCET_SIGNING_KEY
+        faucet_tx=Transaction(amount, "Genesis", self.wallet.public_key_pem)
+        faucet_tx.sign=FAUCET_SIGNING_KEY.sign(str(faucet_tx).encode())
+        return faucet_tx
+
+    async def broadcast_faucet_tx(self, faucet_tx):
+        async with self.mem_pool_lock:
+            self.mem_pool.append(faucet_tx)
+        pkt={
+            "type": "new_tx",
+            "id": faucet_tx.id,
+            "transaction": json.dumps(faucet_tx.to_dict()),
+            "sign": base64.b64encode(faucet_tx.sign).decode(),
+            "sender_pem": "Genesis"
+        }
+        # Registered before broadcasting so a relay of our own message is
+        # dropped by handle_messages instead of double-appending to mem_pool.
+        self.seen_message_ids.add(pkt["id"])
+        await self.broadcast_message(pkt)
+
+    async def handle_peer_left(self, host, port):
+        """
+            Signalling server says a room member is gone: forget it so the
+            dashboard's peer list/topology shrinks, and tell browsers.
+        """
+        try:
+            endpoint=normalize_endpoint((host, port))
+        except OSError:
+            endpoint=(host, int(port))
+        info=self.known_peers.pop(endpoint, None)
+        self.outbound_peers.discard(endpoint)
+        if info:
+            print(f"Peer left room: {info[0]} ({endpoint[0]}:{endpoint[1]})")
+            asyncio.create_task(self.emit_event({"type": "peer_left", "peer": {"host": endpoint[0], "port": endpoint[1], "name": info[0]}}))
+
+    async def auto_stake_loop(self, poll_seconds=5):
+        """
+            Runs on every staker in every room; on/off via AUTO_STAKE env at
+            startup and the dashboard toggle (self.auto_stake) afterwards:
+            - a node with no coins asks the faucet once, so joiners can
+              become validators (the room's first node holds the genesis
+              grant and stakes straight away);
+            - once it has a balance it stakes half of it each epoch, so the
+              network keeps producing blocks without clicking "Add stake".
+            stake_coin() enforces the epoch rules; failures just retry.
+        """
+        funded=False
+        while True:
+            await asyncio.sleep(poll_seconds)
+            try:
+                if not self.auto_stake or self.staked_amt>0:
+                    continue
+                balance=Chain.instance.calc_balance(self.wallet.public_key_pem, self.mem_pool, list(self.current_stakes))
+                if balance>0:
+                    await self.stake_coin(max(1, balance//2))
+                elif not funded and not any(tx.receiver==self.wallet.public_key_pem for tx in self.mem_pool):
+                    funded=True
+                    await self.broadcast_faucet_tx(self.build_faucet_tx(50))
+            except Exception:
+                traceback.print_exc()
+
     async def restart_epoch(self):
         while True:
             await asyncio.sleep(EPOCH_TIME/2)
@@ -1694,6 +1762,9 @@ class Peer:
         consensus_task=asyncio.create_task(self.find_longest_chain())
         disc_task=asyncio.create_task(self.discover_peers())
         sampler_task = asyncio.create_task(self.gossip_peer_sampler())
+        if self.staker:
+            self.auto_stake=os.environ.get("AUTO_STAKE", "").strip().lower() in ("1", "true", "y", "yes")
+            asyncio.create_task(self.auto_stake_loop())
 
 
         if inp_task:
