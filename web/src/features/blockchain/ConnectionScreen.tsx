@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import Antigravity from "@/components/Antigravity";
+import TechText from "@/components/TechText";
 import { ArrowRight, CircleCheck, Database, Loader2, LockKeyhole, Network, Settings2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -103,9 +104,9 @@ export function ConnectionScreen({ onConnect }: { onConnect: (connection: Connec
           ringRadius={10}
           waveSpeed={0.1}
           waveAmplitude={1}
-          particleSize={isMobile ? 0.85 : 1.2}
+          particleSize={isMobile ? 0.75 : 1.2}
           lerpSpeed={0.01}
-          color="#a367fe"
+          color="#dddddd"
           autoAnimate={false}
           particleVariance={0.4}
           rotationSpeed={0}
@@ -118,8 +119,8 @@ export function ConnectionScreen({ onConnect }: { onConnect: (connection: Connec
       <div className="pointer-events-none relative z-10 mx-auto flex min-h-[calc(100vh-3rem)] max-w-6xl flex-col justify-between [&_button]:pointer-events-auto [&_input]:pointer-events-auto [&_label]:pointer-events-auto [&_form]:pointer-events-auto [&_a]:pointer-events-auto sm:min-h-[calc(100vh-5rem)]">
         <header className="flex items-center justify-between border-b border-border pb-5">
           <div className="flex items-center gap-3">
-            <div className="grid h-9 w-9 place-items-center rounded-md bg-primary text-primary-foreground">
-              <Network className="h-5 w-5" />
+            <div className="grid h-10 w-10 shrink-0 place-items-center">
+              <img src="/favicon.ico" alt="" className="h-8 w-8 object-contain" />
             </div>
             <div>
               <div className="font-semibold text-foreground">Consensus Console</div>
@@ -135,8 +136,30 @@ export function ConnectionScreen({ onConnect }: { onConnect: (connection: Connec
             <span className="eyebrow">
               <CircleCheck className="h-3.5 w-3.5" /> Docker Network Ready
             </span>
-            <h1 className="mt-4 max-w-xl text-3xl font-semibold leading-tight text-foreground sm:mt-6 sm:text-5xl">
-              Join your blockchain node.
+            <h1 className="mt-4 h-40 w-full max-w-2xl leading-none sm:mt-6 sm:h-[360px]">
+              <TechText
+                text={`Join Your\nBlockchain Node`}
+                fontWeight={700}
+                fontSize={isMobile ? 64 : 250}
+                align="left"
+                reveal="letter"
+                dashLength={4}
+                dashGap={2}
+                specks={15}
+                fontFamily=""
+                color="#000000"
+                accentColor="#000000"
+                letterSpacing={-0.05}
+                reach={200}
+                softness={0.7}
+                strokeWidth={1.5}
+                speed={1}
+                lineStyle="dashed"
+                selection
+                labels
+                sweep
+                className="pointer-events-auto"
+              />
             </h1>
             <p className="mt-3 max-w-lg text-sm leading-6 text-muted-foreground sm:mt-5 sm:text-base sm:leading-7">
               Inspect consensus mechanisms, validator selection probabilities, mempool transactions,

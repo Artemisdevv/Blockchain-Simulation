@@ -299,8 +299,8 @@ export function Dashboard({
           </Button>
 
           <div className="flex items-center gap-3">
-            <div className="grid h-8 w-8 place-items-center rounded-md bg-primary text-primary-foreground">
-              <Network className="h-4 w-4" />
+            <div className="grid h-9 w-9 shrink-0 place-items-center">
+              <img src="/favicon.ico" alt="" className="h-7 w-7 object-contain" />
             </div>
             <div className="hidden sm:block">
               <div className="text-sm font-semibold">Consensus Console</div>
