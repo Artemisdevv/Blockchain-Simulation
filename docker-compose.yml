@@ -1,6 +1,23 @@
 name: blockchain-simulation
 
 services:
+  frontend:
+    build:
+      context: ./web
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      ALICE_API_PROXY_TARGET: http://peer-alice:6000
+      ALICE_WS_PROXY_TARGET: http://peer-alice:6001
+      BOB_API_PROXY_TARGET: http://peer-bob:6000
+      BOB_WS_PROXY_TARGET: http://peer-bob:6001
+    depends_on:
+      peer-alice:
+        condition: service_healthy
+      peer-bob:
+        condition: service_started
+
   signalling:
     build:
       context: .

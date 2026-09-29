@@ -10,27 +10,28 @@ export default defineConfig({
   vite: {
     server: {
       host: "0.0.0.0",
+      port: 8080,
       // Cloudflare Quick Tunnels use a fresh trycloudflare.com hostname.
       allowedHosts: true,
       proxy: {
         "/api/alice": {
-          target: "http://localhost:6001",
+          target: process.env.ALICE_API_PROXY_TARGET || "http://localhost:6001",
           changeOrigin: true,
           rewrite: (path) => path.replace(/^\/api\/alice/, ""),
         },
         "/api/bob": {
-          target: "http://localhost:6011",
+          target: process.env.BOB_API_PROXY_TARGET || "http://localhost:6011",
           changeOrigin: true,
           rewrite: (path) => path.replace(/^\/api\/bob/, ""),
         },
         "/ws/alice": {
-          target: "http://localhost:6002",
+          target: process.env.ALICE_WS_PROXY_TARGET || "http://localhost:6002",
           changeOrigin: true,
           ws: true,
           rewrite: (path) => path.replace(/^\/ws\/alice/, ""),
         },
         "/ws/bob": {
-          target: "http://localhost:6012",
+          target: process.env.BOB_WS_PROXY_TARGET || "http://localhost:6012",
           changeOrigin: true,
           ws: true,
           rewrite: (path) => path.replace(/^\/ws\/bob/, ""),
