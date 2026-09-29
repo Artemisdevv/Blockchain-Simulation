@@ -1,4 +1,5 @@
 import { useState } from "react";
+import Antigravity from "@/components/Antigravity";
 import { ArrowRight, CircleCheck, Database, Loader2, LockKeyhole, Network, Settings2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -82,8 +83,30 @@ export function ConnectionScreen({ onConnect }: { onConnect: (connection: Connec
   };
 
   return (
-    <main className="min-h-screen bg-background px-5 py-10 sm:px-8 lg:px-12">
-      <div className="mx-auto flex min-h-[calc(100vh-5rem)] max-w-6xl flex-col justify-between">
+    <main className="relative isolate min-h-screen overflow-hidden bg-background px-5 py-10 sm:px-8 lg:px-12">
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-0 z-0"
+      >
+        <Antigravity
+          count={1000}
+          magnetRadius={8}
+          ringRadius={10}
+          waveSpeed={0.1}
+          waveAmplitude={1}
+          particleSize={1.2}
+          lerpSpeed={0.01}
+          color="#a367fe"
+          autoAnimate={false}
+          particleVariance={0.4}
+          rotationSpeed={0}
+          depthFactor={10}
+          pulseSpeed={3}
+          particleShape="sphere"
+          fieldStrength={19}
+        />
+      </div>
+      <div className="pointer-events-none relative z-10 mx-auto flex min-h-[calc(100vh-5rem)] max-w-6xl flex-col justify-between [&_button]:pointer-events-auto [&_input]:pointer-events-auto [&_label]:pointer-events-auto [&_form]:pointer-events-auto [&_a]:pointer-events-auto">
         <header className="flex items-center justify-between border-b border-border pb-5">
           <div className="flex items-center gap-3">
             <div className="grid h-9 w-9 place-items-center rounded-md bg-primary text-primary-foreground">
