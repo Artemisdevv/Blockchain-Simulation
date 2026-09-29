@@ -303,7 +303,7 @@ export function Dashboard({
                 <div className="eyebrow">
                   <Radio className="h-3.5 w-3.5 text-primary" /> Live Network Feed
                 </div>
-                <h1 className="mt-3 text-2xl font-semibold capitalize sm:text-3xl">{view}</h1>
+                <h1 className="mt-3 text-2xl font-semibold sm:text-3xl">{viewTitles[view]}</h1>
                 <p className="mt-1 text-sm text-muted-foreground">{viewDescriptions[view]}</p>
               </div>
               <div className="flex items-center gap-2">
@@ -407,12 +407,22 @@ export function Dashboard({
   );
 }
 
+const viewTitles: Record<View, string> = {
+  overview: "Overview",
+  explorer: "Explorer",
+  network: "Network",
+  validators: "Validators",
+  mempool: "Mempool",
+  attack_lab: "Attack Lab",
+};
+
 const viewDescriptions: Record<View, string> = {
   overview: "Network activity and consensus health at a glance.",
   explorer: "Follow verified blocks and their transaction history.",
   network: "Inspect connected peers and network topology.",
   validators: "Review stake distribution and validator probability.",
   mempool: "Inspect and submit pending transactions.",
+  attack_lab: "Simulate double-sign attacks and test security mechanisms.",
 };
 
 function PanelHeading({
@@ -1177,12 +1187,12 @@ function AttackLab({
       <div className="panel p-6 border-destructive/30 bg-destructive/5">
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div>
-            <div className="flex items-center gap-2 text-destructive font-semibold">
+            <div className="flex items-center gap-2 text-destructive font-semibold text-lg">
               <AlertTriangle className="h-5 w-5" />
               <span>Chaos & Security Attack Lab</span>
             </div>
-            <p className="mt-1 text-sm text-muted-foreground max-w-xl">
-              Simulate live malicious double-sign attacks to demonstrate PoS slashing detection and network resilience without using terminal commands.
+            <p className="mt-1 text-sm text-muted-foreground max-w-xl leading-relaxed">
+              Simulate live malicious double-sign attacks to demonstrate PoS consensus slashing detection and fault tolerance in real time.
             </p>
           </div>
           <Button
@@ -1198,14 +1208,47 @@ function AttackLab({
         </div>
       </div>
 
+      <div className="grid gap-6 sm:grid-cols-2">
+        <div className="panel p-5 space-y-3">
+          <div className="flex items-center gap-2 text-sm font-semibold">
+            <ShieldCheck className="h-4 w-4 text-success" />
+            <span>Target Malicious Node</span>
+          </div>
+          <div className="rounded-lg border border-border p-3 text-xs space-y-2 bg-muted/30">
+            <div className="flex justify-between font-medium">
+              <span>Node Name</span>
+              <span className="font-mono text-destructive font-bold">mallory</span>
+            </div>
+            <div className="flex justify-between text-muted-foreground">
+              <span>Behavior</span>
+              <span>Double-Sign Conflicting Blocks</span>
+            </div>
+            <div className="flex justify-between text-muted-foreground">
+              <span>API Status</span>
+              <span className="text-success">Isolated (P2P Mesh)</span>
+            </div>
+          </div>
+        </div>
+
+        <div className="panel p-5 space-y-3">
+          <div className="flex items-center gap-2 text-sm font-semibold">
+            <ShieldCheck className="h-4 w-4 text-success" />
+            <span>Consensus Slashing Invariant</span>
+          </div>
+          <p className="text-xs text-muted-foreground leading-relaxed">
+            When a validator signs two conflicting blocks at the same height slot, honest nodes detect the invalid signature, broadcast <code className="rounded bg-muted px-1 py-0.5">slash_announcement</code>, and reduce the offender's stake to zero.
+          </p>
+        </div>
+      </div>
+
       {slashed && (
         <div className="alert-danger">
           <div className="flex items-start gap-3">
             <AlertTriangle className="h-5 w-5 shrink-0 text-destructive mt-0.5" />
             <div>
-              <div className="font-semibold">Malicious Node Slashed</div>
-              <p className="mt-1 text-sm opacity-90">
-                Validator <span className="font-mono">{getName(slashed.creator)}</span> produced conflicting double-sign signatures at block index {slashed.block_pos}. Stake immediately slashed to zero!
+              <div className="font-semibold text-base">Malicious Node Slashed</div>
+              <p className="mt-1 text-sm opacity-90 leading-relaxed">
+                Validator <span className="font-mono font-bold">{getName(slashed.creator)}</span> produced conflicting double-sign signatures at block index {slashed.block_pos}. Stake immediately slashed to zero across all honest nodes!
               </p>
             </div>
           </div>

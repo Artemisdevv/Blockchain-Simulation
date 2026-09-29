@@ -291,7 +291,24 @@ def create_app(peer, loop, token, limiter: RateLimiter, auth_tracker: FailedAuth
         if amount <= 0 or amount > 500:
             return jsonify({"ok": False, "error": "Amount must be between 1 and 500"}), 400
 
-        tx = run_coro(peer.create_and_broadcast_tx(peer.wallet.public_key_pem, amount))
+        from consensus.pos.blockchain_structures import Transaction
+        import json
+
+        faucet_tx = Transaction(amount, "Genesis", peer.wallet.public_key_pem)
+
+        async def _add_and_broadcast_faucet():
+            async with peer.mem_pool_lock:
+                peer.mem_pool.append(faucet_tx)
+            pkt = {
+                "type": "new_tx",
+                "id": faucet_tx.id,
+                "transaction": json.dumps(faucet_tx.to_dict()),
+                "sign": "",
+                "sender_pem": "Genesis"
+            }
+            await peer.broadcast_message(pkt)
+
+        run_coro(_add_and_broadcast_faucet())
 
         new_balance = 0
         if Chain.instance:
@@ -303,7 +320,7 @@ def create_app(peer, loop, token, limiter: RateLimiter, auth_tracker: FailedAuth
             "ok": True,
             "added_amount": amount,
             "new_balance": new_balance,
-            "transaction_id": tx.id if tx else None
+            "transaction_id": faucet_tx.id
         })
 
     return app
