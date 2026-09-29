@@ -7,28 +7,31 @@ import { Label } from "@/components/ui/label";
 import { fetchBalance, type Connection } from "@/lib/api-client";
 
 const ALICE_CONNECTION: Connection = {
-  url: import.meta.env.VITE_ALICE_API_URL || "http://localhost:6001",
+  url: import.meta.env["VITE_ALICE_API_URL"] || "http://localhost:6001",
   token: "demo-token-alice",
-  wsUrl: import.meta.env.VITE_ALICE_WS_URL || undefined,
+  wsUrl: import.meta.env["VITE_ALICE_WS_URL"] || undefined,
 };
 const BOB_CONNECTION: Connection = {
-  url: import.meta.env.VITE_BOB_API_URL || "http://localhost:6011",
+  url: import.meta.env["VITE_BOB_API_URL"] || "http://localhost:6011",
   token: "demo-token-bob",
-  wsUrl: import.meta.env.VITE_BOB_WS_URL || undefined,
+  wsUrl: import.meta.env["VITE_BOB_WS_URL"] || undefined,
 };
 
 export function ConnectionScreen({ onConnect }: { onConnect: (connection: Connection) => void }) {
   const [url, setUrl] = useState(ALICE_CONNECTION.url);
   const [token, setToken] = useState(ALICE_CONNECTION.token);
+  const [wsUrl, setWsUrl] = useState(ALICE_CONNECTION.wsUrl ?? "");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [showQr, setShowQr] = useState(false);
   const [copied, setCopied] = useState(false);
   const qrCanvasRef = useRef<HTMLCanvasElement | null>(null);
 
-  const currentShareUrl = `${window.location.origin}/?url=${encodeURIComponent(
-    url,
-  )}&token=${encodeURIComponent(token)}`;
+  const shareUrl = new URL(window.location.origin);
+  shareUrl.searchParams.set("url", url);
+  shareUrl.searchParams.set("token", token);
+  if (wsUrl.trim()) shareUrl.searchParams.set("wsUrl", wsUrl.trim());
+  const currentShareUrl = shareUrl.toString();
 
   // Generate QR Code when modal is opened or URL/Token changes
   useEffect(() => {
@@ -44,7 +47,7 @@ export function ConnectionScreen({ onConnect }: { onConnect: (connection: Connec
     }
   }, [showQr, currentShareUrl]);
 
-  const handleConnect = async (targetUrl: string, targetToken: string, wsUrl?: string) => {
+  const handleConnect = async (targetUrl: string, targetToken: string, targetWsUrl?: string) => {
     if (!targetUrl.trim() || !targetToken.trim()) {
       setError("Enter both the node API URL and Bearer token.");
       return;
@@ -54,7 +57,12 @@ export function ConnectionScreen({ onConnect }: { onConnect: (connection: Connec
     setError("");
 
     try {
-      const conn: Connection = { url: targetUrl.trim(), token: targetToken.trim(), wsUrl };
+      const customWsUrl = targetWsUrl?.trim();
+      const conn: Connection = {
+        url: targetUrl.trim(),
+        token: targetToken.trim(),
+        ...(customWsUrl ? { wsUrl: customWsUrl } : {}),
+      };
       await fetchBalance(conn);
       onConnect(conn);
     } catch (err: any) {
@@ -147,6 +155,7 @@ export function ConnectionScreen({ onConnect }: { onConnect: (connection: Connec
                   onClick={() => {
                     setUrl(ALICE_CONNECTION.url);
                     setToken(ALICE_CONNECTION.token);
+                    setWsUrl(ALICE_CONNECTION.wsUrl ?? "");
                     handleConnect(
                       ALICE_CONNECTION.url,
                       ALICE_CONNECTION.token,
@@ -165,11 +174,8 @@ export function ConnectionScreen({ onConnect }: { onConnect: (connection: Connec
                   onClick={() => {
                     setUrl(BOB_CONNECTION.url);
                     setToken(BOB_CONNECTION.token);
-                    handleConnect(
-                      BOB_CONNECTION.url,
-                      BOB_CONNECTION.token,
-                      BOB_CONNECTION.wsUrl,
-                    );
+                    setWsUrl(BOB_CONNECTION.wsUrl ?? "");
+                    handleConnect(BOB_CONNECTION.url, BOB_CONNECTION.token, BOB_CONNECTION.wsUrl);
                   }}
                   className="flex items-center gap-2"
                 >
@@ -201,7 +207,7 @@ export function ConnectionScreen({ onConnect }: { onConnect: (connection: Connec
             className="panel p-6 sm:p-7"
             onSubmit={(event) => {
               event.preventDefault();
-              handleConnect(url, token);
+              handleConnect(url, token, wsUrl);
             }}
           >
             <div className="mb-6">
@@ -219,6 +225,16 @@ export function ConnectionScreen({ onConnect }: { onConnect: (connection: Connec
                   value={url}
                   onChange={(e) => setUrl(e.target.value)}
                   placeholder="http://localhost:6001"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="node-ws-url">Events WebSocket URL (optional)</Label>
+                <Input
+                  id="node-ws-url"
+                  value={wsUrl}
+                  onChange={(e) => setWsUrl(e.target.value)}
+                  placeholder="wss://example.com/events"
                 />
               </div>
 

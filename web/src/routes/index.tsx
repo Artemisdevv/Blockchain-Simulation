@@ -5,14 +5,14 @@ import { Dashboard } from "@/features/blockchain/Dashboard";
 import type { Connection } from "@/lib/api-client";
 
 const aliceConnection: Connection = {
-  url: import.meta.env.VITE_ALICE_API_URL || "http://localhost:6001",
+  url: import.meta.env["VITE_ALICE_API_URL"] || "http://localhost:6001",
   token: "demo-token-alice",
-  wsUrl: import.meta.env.VITE_ALICE_WS_URL || undefined,
+  wsUrl: import.meta.env["VITE_ALICE_WS_URL"] || undefined,
 };
 const bobConnection: Connection = {
-  url: import.meta.env.VITE_BOB_API_URL || "http://localhost:6011",
+  url: import.meta.env["VITE_BOB_API_URL"] || "http://localhost:6011",
   token: "demo-token-bob",
-  wsUrl: import.meta.env.VITE_BOB_WS_URL || undefined,
+  wsUrl: import.meta.env["VITE_BOB_WS_URL"] || undefined,
 };
 
 export const Route = createFileRoute("/")({
@@ -46,6 +46,7 @@ function Index() {
     const qNode = params.get("node");
     const qUrl = params.get("url");
     const qToken = params.get("token");
+    const qWsUrl = params.get("wsUrl");
 
     let autoConn: Connection | null = null;
 
@@ -54,7 +55,7 @@ function Index() {
     } else if (qNode === "bob") {
       autoConn = bobConnection;
     } else if (qUrl && qToken) {
-      autoConn = { url: qUrl, token: qToken };
+      autoConn = { url: qUrl, token: qToken, ...(qWsUrl ? { wsUrl: qWsUrl } : {}) };
     }
 
     if (autoConn) {
