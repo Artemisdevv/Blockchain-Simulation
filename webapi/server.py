@@ -265,6 +265,33 @@ def create_app(peer, loop, token, limiter: RateLimiter, auth_tracker: FailedAuth
         status = 200 if result.get("ok") else 400
         return jsonify(result), status
 
+    @app.post("/faucet")
+    def post_faucet():
+        data = request.get_json(force=True, silent=True) or {}
+        amount = data.get("amount", 50)
+        try:
+            amount = float(amount)
+        except (TypeError, ValueError):
+            amount = 50.0
+
+        if amount <= 0 or amount > 500:
+            return jsonify({"ok": False, "error": "Amount must be between 1 and 500"}), 400
+
+        tx = run_coro(peer.create_and_broadcast_tx(peer.wallet.public_key_pem, amount))
+
+        new_balance = 0
+        if Chain.instance:
+            new_balance = Chain.instance.calc_balance(
+                peer.wallet.public_key_pem, peer.mem_pool, list(peer.current_stakes)
+            )
+
+        return jsonify({
+            "ok": True,
+            "added_amount": amount,
+            "new_balance": new_balance,
+            "transaction_id": tx.id if tx else None
+        })
+
     return app
 
 

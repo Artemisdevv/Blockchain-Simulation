@@ -110,6 +110,15 @@ Stake an amount for the current epoch (only valid on staker nodes).
 { "ok": false, "error": "..." }
 ```
 
+### `POST /faucet`
+Request test coins for demo testing and staking.
+```json
+// request
+{ "amount": 50 }
+// response
+{ "ok": true, "added_amount": 50, "new_balance": 100, "transaction_id": "uuid" }
+```
+
 ### `GET /invariants`
 Consensus sanity and safety invariants.
 ```json

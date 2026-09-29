@@ -129,6 +129,24 @@ export async function submitStake(
   });
 }
 
+export interface FaucetResponse {
+  ok: boolean;
+  added_amount: number;
+  new_balance: number;
+  transaction_id?: string;
+  error?: string;
+}
+
+export async function requestFaucet(
+  connection: Connection,
+  amount = 50,
+): Promise<FaucetResponse> {
+  return apiRequest<FaucetResponse>(connection, "/faucet", {
+    method: "POST",
+    body: JSON.stringify({ amount }),
+  });
+}
+
 export interface WsEventHandlers {
   onBlockAppended?: (block: any) => void;
   onPeerDiscovered?: (peer: any) => void;

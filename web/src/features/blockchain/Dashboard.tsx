@@ -34,8 +34,10 @@ import {
   fetchMempool,
   fetchPeers,
   fetchStakers,
+  requestFaucet,
   submitStake,
   submitTransaction,
+  triggerAttack,
   type Connection,
   type InvariantsResponse,
 } from "@/lib/api-client";
@@ -51,7 +53,7 @@ import type {
   BalanceResponse,
 } from "./mock-data";
 
-type View = "overview" | "explorer" | "network" | "validators" | "mempool";
+type View = "overview" | "explorer" | "network" | "validators" | "mempool" | "attack_lab";
 
 const nav: Array<{ id: View; label: string; icon: typeof Activity }> = [
   { id: "overview", label: "Overview", icon: Activity },
@@ -59,6 +61,7 @@ const nav: Array<{ id: View; label: string; icon: typeof Activity }> = [
   { id: "network", label: "Network", icon: Network },
   { id: "validators", label: "Validators", icon: ShieldCheck },
   { id: "mempool", label: "Mempool", icon: Database },
+  { id: "attack_lab", label: "Attack Lab", icon: AlertTriangle },
 ];
 
 export function Dashboard({
@@ -90,7 +93,11 @@ export function Dashboard({
   const [lastUpdate, setLastUpdate] = useState(new Date());
   const [wsConnected, setWsConnected] = useState(false);
 
-  // Helper to load all data from REST API
+  // Spectator mode detection
+  const isSpectator =
+    typeof window !== "undefined" &&
+    (new URLSearchParams(window.location.search).get("mode") === "spectator" ||
+      connection.token === "spectator");
   const refreshAll = useCallback(async () => {
     try {
       const [c, p, m, s, b, inv] = await Promise.all([
@@ -214,6 +221,11 @@ export function Dashboard({
           </div>
 
           <div className="ml-auto flex items-center gap-3">
+            {isSpectator && (
+              <span className="status status-info">
+                <ShieldCheck className="h-3.5 w-3.5 mr-1" /> Spectator Mode
+              </span>
+            )}
             <span className={`status ${wsConnected ? "status-online" : "status-neutral"}`}>
               <span className={`status-dot ${wsConnected ? "bg-success" : "bg-muted-foreground"}`} />
               {wsConnected ? "WS Live" : "REST Sync"}
@@ -295,15 +307,36 @@ export function Dashboard({
                 <p className="mt-1 text-sm text-muted-foreground">{viewDescriptions[view]}</p>
               </div>
               <div className="flex items-center gap-2">
-                {view !== "mempool" && (
-                  <Button variant="outline" onClick={() => openView("mempool")}>
-                    <Send /> Send transaction
-                  </Button>
-                )}
-                {view !== "validators" && (
-                  <Button onClick={() => openView("validators")}>
-                    <Coins /> Add stake
-                  </Button>
+                {!isSpectator && (
+                  <>
+                    <Button
+                      variant="outline"
+                      onClick={async () => {
+                        try {
+                          const res = await requestFaucet(connection, 50);
+                          if (res.ok) {
+                            setToast("Dev Faucet: 50 test coins added to your wallet!");
+                            refreshAll();
+                          }
+                        } catch (err: any) {
+                          setToast(err.message || "Failed to request test coins.");
+                        }
+                      }}
+                      className="text-success border-success/30 hover:bg-success/10"
+                    >
+                      <Coins className="h-4 w-4" /> +50 Test Coins
+                    </Button>
+                    {view !== "mempool" && (
+                      <Button variant="outline" onClick={() => openView("mempool")}>
+                        <Send /> Send transaction
+                      </Button>
+                    )}
+                    {view !== "validators" && (
+                      <Button onClick={() => openView("validators")}>
+                        <Coins /> Add stake
+                      </Button>
+                    )}
+                  </>
                 )}
               </div>
             </div>
@@ -1103,6 +1136,81 @@ function Mempool({
           </Button>
         </form>
       </section>
+    </div>
+  );
+}
+
+function AttackLab({
+  connection,
+  slashed,
+  getName,
+  onToast,
+  onRefresh,
+}: {
+  connection: Connection;
+  slashed: NodeSlashedEvent | null;
+  getName: (pk: string) => string;
+  onToast: (s: string) => void;
+  onRefresh: () => void;
+}) {
+  const [loading, setLoading] = useState(false);
+
+  const handleTriggerAttack = async () => {
+    setLoading(true);
+    try {
+      const res = await triggerAttack(connection, "double_sign");
+      if (res.ok) {
+        onToast("Malicious attack triggered! Slashing evidence broadcast to network.");
+        onRefresh();
+      } else {
+        onToast(res.error || "Failed to trigger attack.");
+      }
+    } catch (err: any) {
+      onToast(err.message || "Error triggering attack.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="panel p-6 border-destructive/30 bg-destructive/5">
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <div>
+            <div className="flex items-center gap-2 text-destructive font-semibold">
+              <AlertTriangle className="h-5 w-5" />
+              <span>Chaos & Security Attack Lab</span>
+            </div>
+            <p className="mt-1 text-sm text-muted-foreground max-w-xl">
+              Simulate live malicious double-sign attacks to demonstrate PoS slashing detection and network resilience without using terminal commands.
+            </p>
+          </div>
+          <Button
+            variant="destructive"
+            size="lg"
+            onClick={handleTriggerAttack}
+            disabled={loading}
+            className="flex items-center gap-2 shadow-lg"
+          >
+            <AlertTriangle className="h-5 w-5" />
+            {loading ? "Triggering Attack..." : "Trigger Double-Sign Attack"}
+          </Button>
+        </div>
+      </div>
+
+      {slashed && (
+        <div className="alert-danger">
+          <div className="flex items-start gap-3">
+            <AlertTriangle className="h-5 w-5 shrink-0 text-destructive mt-0.5" />
+            <div>
+              <div className="font-semibold">Malicious Node Slashed</div>
+              <p className="mt-1 text-sm opacity-90">
+                Validator <span className="font-mono">{getName(slashed.creator)}</span> produced conflicting double-sign signatures at block index {slashed.block_pos}. Stake immediately slashed to zero!
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
