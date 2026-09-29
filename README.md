@@ -131,12 +131,12 @@ The system is composed of a web dashboard, REST API, signalling service, and a n
                      │                         │
                      │       Peer Network      │
                      │                         │
-              ┌──────▼──────┐           ┌────▼──────┐
-              │    Alice    │◄──── P2P ────►│    Bob    │
-              └──────┬──────┘           └────┬──────┘
-                     │                       │
-                     │      P2P Network      │
-                     └───────────┬───────────┘
+              ┌──────▼──────┐             ┌────▼──────┐
+              │    Alice    │◄─── P2P ───►│    Bob    │
+              └──────┬──────┘             └────┬──────┘
+                     │                         │
+                     │       P2P Network       │
+                     └───────────┬─────────────┘
                                  │
                           Peer Discovery
                                  │
