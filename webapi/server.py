@@ -151,7 +151,49 @@ def create_app(peer, loop, token, limiter: RateLimiter, auth_tracker: FailedAuth
     def get_chain():
         if not Chain.instance:
             return jsonify({"blocks": []})
-        return jsonify({"blocks": Chain.instance.to_block_dict_list()})
+
+        blocks_dicts = Chain.instance.to_block_dict_list()
+
+        # Support ?height=N or ?limit=N for Time-Travel Scrubber
+        height = request.args.get("height", type=int)
+        if height is not None and height >= 0:
+            blocks_dicts = blocks_dicts[:height + 1]
+
+        return jsonify({"blocks": blocks_dicts})
+
+    @app.get("/metrics")
+    def get_metrics():
+        if not Chain.instance:
+            return jsonify({
+                "blocks_count": 0,
+                "total_transactions": 0,
+                "total_staked": 0,
+                "mempool_count": len(peer.mem_pool),
+                "peer_count": len(peer.known_peers),
+                "avg_block_time_sec": 30,
+                "room_id": getattr(peer, "room_id", "demo")
+            })
+
+        blocks = Chain.instance.chain
+        blocks_count = len(blocks)
+        total_txs = sum(len(b.transactions) for b in blocks)
+        total_staked = sum(peer.current_stakers.values()) if peer.current_stakers else 0
+
+        avg_block_time = 30.0
+        if blocks_count > 1:
+            time_diff = blocks[-1].ts - blocks[0].ts
+            if time_diff > 0:
+                avg_block_time = round(time_diff / (blocks_count - 1), 1)
+
+        return jsonify({
+            "blocks_count": blocks_count,
+            "total_transactions": total_txs,
+            "total_staked": total_staked,
+            "mempool_count": len(peer.mem_pool),
+            "peer_count": len(peer.known_peers),
+            "avg_block_time_sec": avg_block_time,
+            "room_id": getattr(peer, "room_id", "demo")
+        })
 
     @app.get("/peers")
     def get_peers():

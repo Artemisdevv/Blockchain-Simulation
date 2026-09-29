@@ -84,6 +84,20 @@ export interface TriggerAttackResponse {
   error?: string;
 }
 
+export interface MetricsResponse {
+  blocks_count: number;
+  total_transactions: number;
+  total_staked: number;
+  mempool_count: number;
+  peer_count: number;
+  avg_block_time_sec: number;
+  room_id: string;
+}
+
+export async function fetchMetrics(connection: Connection): Promise<MetricsResponse> {
+  return apiRequest<MetricsResponse>(connection, "/metrics");
+}
+
 export async function triggerAttack(
   connection: Connection,
   attackType = "double_sign",
