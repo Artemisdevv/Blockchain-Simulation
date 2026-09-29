@@ -65,7 +65,8 @@ class MaliciousPeer(Peer):
 
             blocks = []
             for receiver, share in ((first, 0.75), (second, 0.5)):
-                tx = Transaction(balance * share, me, receiver)
+                # Whole coins only: fractional payouts leaked into honest balances.
+                tx = Transaction(max(1, int(balance * share)), me, receiver)
                 tx.sign = self.wallet.private_key.sign(str(tx).encode())
                 block = Block(Chain.instance.lastBlock.hash, pending + [tx])
                 block.files = self.file_hashes.copy()
