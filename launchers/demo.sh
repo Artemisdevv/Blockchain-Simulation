@@ -6,8 +6,26 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd)"
 cd "$REPO_ROOT" || exit 1
 
-compose_output=$(docker compose --profile demo up -d --build --wait --wait-timeout 90 2>&1)
+compose_args=(--profile demo up -d --build --wait --wait-timeout 90)
+compose_output=$(docker compose "${compose_args[@]}" 2>&1)
 compose_status=$?
+if (( compose_status != 0 )) \
+  && printf '%s\n' "$compose_output" | grep -Eqi 'failed to fetch anonymous token' \
+  && printf '%s\n' "$compose_output" | grep -Eqi 'auth\.docker\.io|registry-1\.docker\.io' \
+  && printf '%s\n' "$compose_output" | grep -Eqi 'i/o timeout|no such host|temporary failure in name resolution|connection timed out'; then
+  printf '\033[33mDocker Hub DNS/token request timed out. Retrying Compose startup once...\033[0m\n' >&2
+  printf '%s\n' "$compose_output" \
+    | grep -Ei 'failed to fetch anonymous token|auth\.docker\.io|registry-1\.docker\.io|lookup .* (i/o timeout|no such host|temporary failure)|connection timed out' >&2 || true
+  sleep 3
+  retry_output=$(docker compose "${compose_args[@]}" 2>&1)
+  retry_status=$?
+  compose_output+=$'\n\n--- Docker Compose retry output ---\n'"$retry_output"
+  compose_status=$retry_status
+  if (( compose_status == 0 )); then
+    printf '\033[32mDocker Compose startup succeeded on retry.\033[0m\n'
+  fi
+fi
+
 if (( compose_status != 0 )); then
   printf '\033[31mERROR: Docker Compose failed to start the application (exit code %s).\033[0m\n' "$compose_status" >&2
   printf '%s\n' "$compose_output" >&2
