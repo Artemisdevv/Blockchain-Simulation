@@ -25,6 +25,8 @@ from datetime import datetime
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 
+from ecdsa import VerifyingKey, BadSignatureError
+
 from consensus.pos.blockchain_structures import Chain
 from webapi.rate_limit import RateLimiter, FailedAuthTracker
 
@@ -46,6 +48,62 @@ MAX_REQUESTS_PER_MINUTE = 300
 MAX_AUTH_FAILURES = 5
 AUTH_FAILURE_WINDOW_SECONDS = 60
 AUTH_BLOCK_SECONDS = 300
+
+
+def _chain_hash_linkage_ok(blocks):
+    """Every block's prevHash must match the actual hash of the block before it."""
+    for i in range(1, len(blocks)):
+        if blocks[i].prevHash != blocks[i - 1].hash:
+            return False
+    return True
+
+
+def _chain_proposers_valid(blocks):
+    """Every non-genesis block's signature must verify against its claimed creator."""
+    for block in blocks[1:]:
+        if not block.creator or not block.sign:
+            return False
+        try:
+            VerifyingKey.from_pem(block.creator).verify(block.sign, str(block).encode())
+        except (BadSignatureError, Exception):
+            return False
+    return True
+
+
+def _chain_supply_conserved(blocks):
+    """
+    Total coins minted (genesis grant + faucet grants + 6/block miner reward)
+    minus stake destroyed by slashing must equal the sum of every wallet's
+    balance derived from the same chain - same accounting rules calc_balance()
+    uses, just applied to every participant at once instead of one pubkey.
+    """
+    minted = 0
+    slashed_out = 0
+    balances = {}
+
+    def add(pubkey, amount):
+        if pubkey in ("Genesis", "deploy", "invoke", None):
+            return
+        balances[pubkey] = balances.get(pubkey, 0) + amount
+
+    for i, block in enumerate(blocks):
+        if not block.is_valid:
+            continue
+        for tx in block.transactions:
+            amount = tx.payload[-1] if tx.receiver in ("deploy", "invoke") else tx.payload
+            if tx.sender == "Genesis":
+                minted += amount
+            else:
+                add(tx.sender, -amount)
+            add(tx.receiver, amount)
+        if i != 0 and block.creator:
+            minted += 6
+            add(block.creator, 6)
+        if block.slash_creator and block.creator:
+            slashed_out += block.staked_amt
+            add(block.creator, -block.staked_amt)
+
+    return sum(balances.values()) == minted - slashed_out
 
 
 def create_app(peer, loop, token, limiter: RateLimiter, auth_tracker: FailedAuthTracker):
@@ -97,14 +155,11 @@ def create_app(peer, loop, token, limiter: RateLimiter, auth_tracker: FailedAuth
 
         blocks = Chain.instance.chain
         total_blocks = len(blocks)
-        
-        # Check supply consistency and valid creators
-        valid_proposers = all(b.creator is not None for b in blocks)
-        
+
         return jsonify({
-            "honest_consensus": True,
-            "supply_conserved": True,
-            "valid_proposers": valid_proposers,
+            "honest_consensus": _chain_hash_linkage_ok(blocks),
+            "supply_conserved": _chain_supply_conserved(blocks),
+            "valid_proposers": _chain_proposers_valid(blocks),
             "total_blocks": total_blocks,
             "mempool_count": len(peer.mem_pool),
             "peer_count": len(peer.known_peers),
@@ -208,6 +263,12 @@ def create_app(peer, loop, token, limiter: RateLimiter, auth_tracker: FailedAuth
             {"host": h, "port": p, "name": n, "public_key": pk}
             for (h, p), (n, pk) in peer.known_peers.items()
         ]
+        peers.append({
+            "host": peer.host,
+            "port": peer.port,
+            "name": peer.name,
+            "public_key": peer.wallet.public_key_pem,
+        })
         return jsonify({"peers": peers})
 
     @app.get("/mempool")
@@ -225,7 +286,7 @@ def create_app(peer, loop, token, limiter: RateLimiter, auth_tracker: FailedAuth
     @app.get("/balance")
     def get_balance():
         if not Chain.instance:
-            return jsonify({"public_key": peer.wallet.public_key_pem, "balance": 0})
+            return jsonify({"public_key": peer.wallet.public_key_pem, "balance": 0, "pending_income": 0})
         raw_balance = Chain.instance.calc_balance(
             peer.wallet.public_key_pem, peer.mem_pool, list(peer.current_stakes)
         )
@@ -234,14 +295,21 @@ def create_app(peer, loop, token, limiter: RateLimiter, auth_tracker: FailedAuth
             for b in Chain.instance.chain
         )
 
-        # Include pending incoming faucet coins in mempool
-        pending_faucet_income = sum(
+        # Incoming coins sitting in mempool aren't spendable/stakeable yet - not
+        # mined, so not final. Surfaced separately so the UI can show it without
+        # letting the user try to spend/stake against money they don't have yet
+        # (matches /transactions and /stakes, which validate against raw_balance).
+        pending_income = sum(
             tx.payload for tx in peer.mem_pool
-            if tx.receiver == peer.wallet.public_key_pem and tx.sender == "Genesis"
+            if tx.receiver == peer.wallet.public_key_pem
         )
 
-        display_balance = (raw_balance + pending_faucet_income) if is_slashed else max(0, raw_balance + pending_faucet_income)
-        return jsonify({"public_key": peer.wallet.public_key_pem, "balance": display_balance})
+        spendable_balance = raw_balance if is_slashed else max(0, raw_balance)
+        return jsonify({
+            "public_key": peer.wallet.public_key_pem,
+            "balance": spendable_balance,
+            "pending_income": pending_income,
+        })
 
     @app.post("/transactions")
     def post_transaction():
