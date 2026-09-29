@@ -48,6 +48,18 @@ services:
     ports:
       - "6001:6000"  # web API
       - "6002:6001"  # events websocket
+    healthcheck:
+      # Room-joining is a race: whichever node's join_room() call lands
+      # first in an empty room creates genesis, and the web API answers
+      # before that's even decided (see webapi/healthcheck.py). Without
+      # this, bob/mallory/swarm depending on "service_started" could win
+      # the race against alice and end up creating their own genesis
+      # instead of joining hers - each node minting its own economy.
+      test: ["CMD", "python", "-m", "webapi.healthcheck"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
 
   peer-bob:
     build:
@@ -59,7 +71,7 @@ services:
       signalling:
         condition: service_healthy
       peer-alice:
-        condition: service_started
+        condition: service_healthy
     environment:
       PEER_HOST: peer-bob
       PEER_PORT: "5000"
@@ -92,7 +104,7 @@ services:
       signalling:
         condition: service_healthy
       peer-alice:
-        condition: service_started
+        condition: service_healthy
     environment:
       PEER_HOST: peer-mallory
       PEER_PORT: "5000"
@@ -123,7 +135,7 @@ services:
       signalling:
         condition: service_healthy
       peer-alice:
-        condition: service_started
+        condition: service_healthy
     environment:
       AUTO_DETECT_HOST: "true"
       PEER_PORT: "5000"
