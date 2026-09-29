@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Antigravity from "@/components/Antigravity";
 import { ArrowRight, CircleCheck, Database, Loader2, LockKeyhole, Network, Settings2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -20,6 +20,15 @@ export function ConnectionScreen({ onConnect }: { onConnect: (connection: Connec
   const [advUrl, setAdvUrl] = useState("");
   const [advToken, setAdvToken] = useState("");
   const [advWsUrl, setAdvWsUrl] = useState("");
+  const [isMobile, setIsMobile] = useState(false);
+
+  useEffect(() => {
+    const mobileQuery = window.matchMedia("(max-width: 639px)");
+    const updateScreenSize = () => setIsMobile(mobileQuery.matches);
+    updateScreenSize();
+    mobileQuery.addEventListener("change", updateScreenSize);
+    return () => mobileQuery.removeEventListener("change", updateScreenSize);
+  }, []);
 
   const connectWith = async (conn: Connection) => {
     setLoading(true);
@@ -83,30 +92,30 @@ export function ConnectionScreen({ onConnect }: { onConnect: (connection: Connec
   };
 
   return (
-    <main className="relative isolate min-h-screen overflow-hidden bg-background px-5 py-10 sm:px-8 lg:px-12">
+    <main className="relative isolate min-h-screen overflow-hidden bg-background px-4 py-6 sm:px-8 sm:py-10 lg:px-12">
       <div
         aria-hidden="true"
         className="pointer-events-none absolute inset-0 z-0"
       >
         <Antigravity
-          count={1000}
+          count={isMobile ? 220 : 1000}
           magnetRadius={8}
           ringRadius={10}
           waveSpeed={0.1}
           waveAmplitude={1}
-          particleSize={1.2}
+          particleSize={isMobile ? 0.85 : 1.2}
           lerpSpeed={0.01}
           color="#a367fe"
           autoAnimate={false}
           particleVariance={0.4}
           rotationSpeed={0}
-          depthFactor={10}
+          depthFactor={isMobile ? 3 : 10}
           pulseSpeed={3}
           particleShape="sphere"
           fieldStrength={19}
         />
       </div>
-      <div className="pointer-events-none relative z-10 mx-auto flex min-h-[calc(100vh-5rem)] max-w-6xl flex-col justify-between [&_button]:pointer-events-auto [&_input]:pointer-events-auto [&_label]:pointer-events-auto [&_form]:pointer-events-auto [&_a]:pointer-events-auto">
+      <div className="pointer-events-none relative z-10 mx-auto flex min-h-[calc(100vh-3rem)] max-w-6xl flex-col justify-between [&_button]:pointer-events-auto [&_input]:pointer-events-auto [&_label]:pointer-events-auto [&_form]:pointer-events-auto [&_a]:pointer-events-auto sm:min-h-[calc(100vh-5rem)]">
         <header className="flex items-center justify-between border-b border-border pb-5">
           <div className="flex items-center gap-3">
             <div className="grid h-9 w-9 place-items-center rounded-md bg-primary text-primary-foreground">
@@ -121,20 +130,20 @@ export function ConnectionScreen({ onConnect }: { onConnect: (connection: Connec
         </header>
 
 
-        <section className="grid items-center gap-14 py-12 lg:grid-cols-[1fr_440px]">
+        <section className="grid items-center gap-8 py-8 sm:gap-14 sm:py-12 lg:grid-cols-[1fr_440px]">
           <div className="max-w-2xl">
             <span className="eyebrow">
               <CircleCheck className="h-3.5 w-3.5" /> Docker Network Ready
             </span>
-            <h1 className="mt-6 max-w-xl text-4xl font-semibold leading-tight text-foreground sm:text-5xl">
+            <h1 className="mt-4 max-w-xl text-3xl font-semibold leading-tight text-foreground sm:mt-6 sm:text-5xl">
               Join your blockchain node.
             </h1>
-            <p className="mt-5 max-w-lg text-base leading-7 text-muted-foreground">
+            <p className="mt-3 max-w-lg text-sm leading-6 text-muted-foreground sm:mt-5 sm:text-base sm:leading-7">
               Inspect consensus mechanisms, validator selection probabilities, mempool transactions,
               and live slashing events in real time.
             </p>
 
-            <div className="mt-10 grid max-w-xl gap-4 sm:grid-cols-3">
+            <div className="mt-6 hidden max-w-xl gap-4 sm:mt-10 sm:grid sm:grid-cols-3">
               {[
                 [Database, "Chain data", "Inspect every block"],
                 [Network, "Peer health", "Track P2P mesh"],
@@ -152,15 +161,15 @@ export function ConnectionScreen({ onConnect }: { onConnect: (connection: Connec
             </div>
           </div>
 
-          <form className="panel p-6 sm:p-7" onSubmit={handleJoin}>
-            <div className="mb-6">
+          <form className="panel p-5 sm:p-7" onSubmit={handleJoin}>
+            <div className="mb-5 sm:mb-6">
               <h2 className="text-lg font-semibold">Join as your peer</h2>
               <p className="mt-1 text-sm text-muted-foreground">
                 Start a PoS peer and join a room on the Compose network.
               </p>
             </div>
 
-            <div className="space-y-5">
+            <div className="space-y-4 sm:space-y-5">
               <div className="space-y-2">
                 <Label htmlFor="peer-name">Node Name</Label>
                 <Input
@@ -274,7 +283,7 @@ export function ConnectionScreen({ onConnect }: { onConnect: (connection: Connec
           </form>
         </section>
 
-        <footer className="flex flex-wrap items-center justify-between gap-3 border-t border-border py-5 text-xs text-muted-foreground">
+        <footer className="flex flex-wrap items-center justify-between gap-2 border-t border-border py-4 text-[11px] text-muted-foreground sm:gap-3 sm:py-5 sm:text-xs">
           <span>Consensus Console v1.0</span>
           <span>Blockchain Network Monitor & Consensus Simulator</span>
         </footer>
