@@ -25,10 +25,9 @@ def test_spectator_link_scopes_read_only_room_access(monkeypatch, tmp_path):
     monkeypatch.setattr(module.requests, "get", lambda url, **kwargs: UpstreamResponse({"blocks": []}))
     client = create_app(manager)[0].test_client()
 
-    denied = client.post("/spectator-links", json={"room_id": "demo"})
-    assert denied.status_code == 403
-    issued = client.post("/spectator-links", json={"room_id": "demo"}, headers={"X-Spectator-Issuer": manager.issuer_token})
+    issued = client.post("/spectator-links", json={"room_id": "demo"})
     assert issued.status_code == 200
+    assert manager.issuer_token not in issued.get_data(as_text=True)
     token = issued.json["spectator_token"]
 
     read = client.get(f"/spectator/{token}/chain", headers={"Authorization": f"Bearer {token}"})

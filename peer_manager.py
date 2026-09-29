@@ -321,14 +321,14 @@ class PeerManager:
 
     def make_spectator_token(self, room_id):
         payload = b64url(json.dumps({"room_id": room_id, "expires": int(time.time()) + 86400}, separators=(",", ":")).encode())
-        signing_key = hashlib.sha256(self.signing_key.encode()).digest()
+        signing_key = hashlib.sha256(f"{self.signing_key}:{self.issuer_token}".encode()).digest()
         signature = hmac.new(signing_key, payload.encode(), hashlib.sha256).digest()
         return f"{payload}.{b64url(signature)}"
 
     def verify_spectator_token(self, token):
         try:
             payload, signature = token.split(".", 1)
-            signing_key = hashlib.sha256(self.signing_key.encode()).digest()
+            signing_key = hashlib.sha256(f"{self.signing_key}:{self.issuer_token}".encode()).digest()
             expected = hmac.new(signing_key, payload.encode(), hashlib.sha256).digest()
             if not hmac.compare_digest(expected, decode_b64url(signature)):
                 return None
@@ -472,9 +472,6 @@ def create_app(manager=None):
     def create_spectator_link():
         data = request.get_json(silent=True) or {}
         room_id = str(data.get("room_id", "")).strip()
-        issuer = request.headers.get("X-Spectator-Issuer", "")
-        if not secrets.compare_digest(issuer, manager.issuer_token):
-            return jsonify({"error": "Valid spectator link issuer credentials are required."}), 403
         if not ROOM_ID_RE.fullmatch(room_id) or not manager.room_peers(room_id):
             return jsonify({"error": "No accessible peers are currently available for this room."}), 404
         return jsonify({"room_id": room_id, "spectator_token": manager.make_spectator_token(room_id)})

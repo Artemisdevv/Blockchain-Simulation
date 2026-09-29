@@ -88,10 +88,10 @@ export async function listManagedPeers(): Promise<ManagedPeerSummary[]> {
   return data.peers;
 }
 
-export async function createSpectatorLink(roomId: string, issuerToken: string): Promise<string> {
+export async function createSpectatorLink(roomId: string): Promise<string> {
   const response = await fetch("/api/peer-setup/spectator-links", {
     method: "POST",
-    headers: { "Content-Type": "application/json", "X-Spectator-Issuer": issuerToken },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ room_id: roomId }),
   });
   const data = await response.json();

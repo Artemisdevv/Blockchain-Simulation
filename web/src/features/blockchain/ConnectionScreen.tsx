@@ -17,7 +17,6 @@ export function ConnectionScreen({ onConnect }: { onConnect: (connection: Connec
   const [showQr, setShowQr] = useState(false);
   const [copied, setCopied] = useState(false);
   const [spectatorShareUrl, setSpectatorShareUrl] = useState("");
-  const [spectatorIssuer, setSpectatorIssuer] = useState("");
   const qrCanvasRef = useRef<HTMLCanvasElement | null>(null);
 
   // Advanced/custom connection, for spectators or non-standard deployments
@@ -126,8 +125,7 @@ export function ConnectionScreen({ onConnect }: { onConnect: (connection: Connec
     setLoading(true);
     setError("");
     try {
-      if (!spectatorIssuer.trim()) throw new Error("Enter the spectator link issuer credential from the peer-manager logs or deployment configuration.");
-      setSpectatorShareUrl(await createSpectatorLink(roomId.trim() || "demo", spectatorIssuer.trim()));
+      setSpectatorShareUrl(await createSpectatorLink(roomId.trim() || "demo"));
       setShowQr(true);
     } catch (err: any) {
       setError(err.message || "Could not create a spectator link for this room.");
@@ -172,10 +170,6 @@ export function ConnectionScreen({ onConnect }: { onConnect: (connection: Connec
               <p className="text-xs leading-relaxed text-muted-foreground">
                 Scan this QR code or copy the link below to open the dashboard live on your mobile device or secondary browser. Automatically connects in Spectator mode!
               </p>
-              <div className="space-y-1">
-                <Label htmlFor="spectator-issuer" className="text-xs">Spectator link issuer credential</Label>
-                <Input id="spectator-issuer" type="password" value={spectatorIssuer} onChange={(e) => setSpectatorIssuer(e.target.value)} placeholder="From peer-manager logs or deployment configuration" />
-              </div>
               <div className="flex items-center gap-2 pt-2">
                 <Input
                   readOnly
