@@ -51,7 +51,6 @@ import {
   stopRoomPeer,
   submitStake,
   submitTransaction,
-  triggerAttack,
   PeerGoneError,
   type Connection,
   type InvariantsResponse,
@@ -358,7 +357,7 @@ export function Dashboard({
                 <h1 className="mt-3 text-2xl font-semibold sm:text-3xl">{viewTitles[view]}</h1>
                 <p className="mt-1 text-sm text-muted-foreground">{viewDescriptions[view]}</p>
               </div>
-            <div className="flex items-center gap-2">
+            <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
                 {isSpectator && <Button variant="outline" onClick={async () => {
                     try { await downloadRunReport(connection); }
                     catch (err: any) { setToast(err.message || "PDF export failed."); }
@@ -797,7 +796,7 @@ function Overview({
 }
 
 function Explorer({
-  chain,
+  chain: liveChain,
   slashed,
   getName,
   onBlock,
@@ -809,13 +808,92 @@ function Explorer({
   onBlock: (b: Block) => void;
   onTx: (t: Transaction) => void;
 }) {
+  // Time-travel scrubber: `viewHeight` is how many blocks of history are shown, or null
+  // to follow the live chain. Blocks are append-only, so slicing the chain replays it
+  // exactly as it looked at that height; new blocks keep arriving while you look back.
+  const total = liveChain.blocks.length;
+  const [viewHeight, setViewHeight] = useState<number | null>(null);
+  const [playing, setPlaying] = useState(false);
+  const shown = Math.min(viewHeight ?? total, total);
+  const chain: ChainResponse = { ...liveChain, blocks: liveChain.blocks.slice(0, shown) };
+  const replaying = viewHeight !== null && shown < total;
+
+  useEffect(() => {
+    if (!playing) return;
+    const timer = window.setInterval(() => {
+      setViewHeight((current) => {
+        const next = (current ?? total) + 1;
+        if (next >= total) {
+          setPlaying(false);
+          return null;
+        }
+        return next;
+      });
+    }, 900);
+    return () => window.clearInterval(timer);
+  }, [playing, total]);
+
+  const confirmedTxs = chain.blocks.reduce((sum, block) => sum + block.transactions.length, 0);
+  const shownTip = chain.blocks[chain.blocks.length - 1];
+
   return (
     <div className="space-y-6">
       <section className="panel overflow-hidden">
         <PanelHeading
           title="Canonical Chain"
-          detail={`${chain.blocks.length} blocks · newest first`}
+          detail={
+            replaying
+              ? `Replaying: block ${shown} of ${total} · newest first`
+              : `${total} blocks · newest first`
+          }
         />
+        {total > 1 && (
+          <div className="border-b border-border px-6 py-4">
+            <div className="flex flex-wrap items-center gap-3">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  if (playing) return setPlaying(false);
+                  setViewHeight(1);
+                  setPlaying(true);
+                }}
+              >
+                {playing ? "Pause" : "Replay from start"}
+              </Button>
+              <input
+                type="range"
+                aria-label="Time travel through the chain"
+                className="h-2 min-w-[160px] flex-1 cursor-pointer accent-primary"
+                min={1}
+                max={total}
+                value={shown}
+                onChange={(e) => {
+                  setPlaying(false);
+                  const next = Number(e.target.value);
+                  setViewHeight(next >= total ? null : next);
+                }}
+              />
+              <Button
+                variant={replaying ? "default" : "outline"}
+                size="sm"
+                disabled={!replaying}
+                onClick={() => {
+                  setPlaying(false);
+                  setViewHeight(null);
+                }}
+              >
+                Back to live
+              </Button>
+            </div>
+            <p className="mt-2 text-xs text-muted-foreground">
+              {replaying ? "Time travel: " : "Live: "}
+              {`chain height ${shown} · ${confirmedTxs} confirmed transaction${confirmedTxs === 1 ? "" : "s"}`}
+              {shownTip ? ` · tip ${shortKey(shownTip.id, 8, 4)} at ${formatTime(shownTip.ts)}` : ""}
+              {replaying ? ` · ${total - shown} newer block${total - shown === 1 ? "" : "s"} hidden` : ""}
+            </p>
+          </div>
+        )}
         <div className="chain-scroll">
           <div className="flex min-w-max items-stretch gap-0 p-6">
             {[...chain.blocks].reverse().map((block, index) => {
@@ -1408,23 +1486,6 @@ function AttackLab({
     }).catch(() => setManagedPeers([]));
   }, [connection]);
 
-  const handleTriggerAttack = async () => {
-    setLoading(true);
-    try {
-      const res = await triggerAttack(connection, "double_sign");
-      if (res.ok) {
-        onToast("Malicious attack triggered! Slashing evidence broadcast to network.");
-        onRefresh();
-      } else {
-        onToast(res.error || "Failed to trigger attack.");
-      }
-    } catch (err: any) {
-      onToast(err.message || "Error triggering attack.");
-    } finally {
-      setLoading(false);
-    }
-  };
-
   const applyAction = async (action: () => Promise<unknown>, success: string) => {
     setLoading(true);
     try {
@@ -1449,22 +1510,15 @@ function AttackLab({
           <div>
             <div className="flex items-center gap-2 text-destructive font-semibold text-lg">
               <AlertTriangle className="h-5 w-5" />
-              <span>Chaos & Security Attack Lab</span>
+              <span>Chaos Lab</span>
             </div>
-            <p className="mt-1 text-sm text-muted-foreground max-w-xl leading-relaxed">
-              Simulate live malicious double-sign attacks to demonstrate PoS consensus slashing detection and fault tolerance in real time.
+            <p className="mt-1 text-sm text-muted-foreground max-w-2xl leading-relaxed">
+              Fault injection for demonstrating resilience: the controls below act on the node you are
+              connected to (or, for Kill, on a managed node). To see slashing, join a node with
+              &ldquo;Join as a malicious node&rdquo; ticked: it double-signs when elected, and honest nodes
+              detect the conflicting blocks and slash it.
             </p>
           </div>
-          <Button
-            variant="destructive"
-            size="lg"
-            onClick={handleTriggerAttack}
-            disabled={loading}
-            className="flex items-center gap-2 shadow-lg"
-          >
-            <AlertTriangle className="h-5 w-5" />
-            {loading ? "Triggering Attack..." : "Trigger Double-Sign Attack"}
-          </Button>
         </div>
       </div>
 
