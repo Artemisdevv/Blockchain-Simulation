@@ -114,10 +114,10 @@ export function Dashboard({
     }
   }, [connection]);
 
-  // Initial load & short polling
+  // Initial load & lightweight background refresh (30s cadence since WebSocket streams live updates)
   useEffect(() => {
     refreshAll();
-    const interval = window.setInterval(refreshAll, 3000);
+    const interval = window.setInterval(refreshAll, 30000);
     return () => window.clearInterval(interval);
   }, [refreshAll]);
 
@@ -295,12 +295,16 @@ export function Dashboard({
                 <p className="mt-1 text-sm text-muted-foreground">{viewDescriptions[view]}</p>
               </div>
               <div className="flex items-center gap-2">
-                <Button variant="outline" onClick={() => openView("mempool")}>
-                  <Send /> Send transaction
-                </Button>
-                <Button onClick={() => openView("validators")}>
-                  <Coins /> Add stake
-                </Button>
+                {view !== "mempool" && (
+                  <Button variant="outline" onClick={() => openView("mempool")}>
+                    <Send /> Send transaction
+                  </Button>
+                )}
+                {view !== "validators" && (
+                  <Button onClick={() => openView("validators")}>
+                    <Coins /> Add stake
+                  </Button>
+                )}
               </div>
             </div>
 
@@ -796,6 +800,25 @@ function NetworkPanel({ peers, selfPk }: { peers: PeersResponse; selfPk: string 
                 </div>
               );
             })}
+          </div>
+        </div>
+      </section>
+
+      <section className="col-span-full panel p-5 bg-card">
+        <div className="flex items-start gap-4">
+          <div className="grid h-10 w-10 place-items-center rounded-lg bg-primary/10 text-primary shrink-0">
+            <Server className="h-5 w-5" />
+          </div>
+          <div>
+            <h3 className="text-sm font-semibold text-foreground">Dynamic Swarm Node Scaling</h3>
+            <p className="mt-1 text-xs text-muted-foreground leading-relaxed">
+              Scale network nodes on demand using Docker Compose. Every new replica auto-detects its container IP and bootstraps into room <code className="rounded bg-muted px-1.5 py-0.5 text-primary">demo</code> via the Signalling Server.
+            </p>
+            <div className="mt-3 flex items-center gap-2">
+              <code className="rounded bg-muted px-2 py-1 font-mono text-xs text-foreground select-all">
+                docker compose up -d --scale peer-swarm=5
+              </code>
+            </div>
           </div>
         </div>
       </section>

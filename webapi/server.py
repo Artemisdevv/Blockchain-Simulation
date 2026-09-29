@@ -35,7 +35,7 @@ EPOCH_TIME = 60  # kept in sync with consensus/pos/p2p.py's EPOCH_TIME
 # malicious website open in someone's browser from silently calling this API.
 _ALLOWED_ORIGIN_PATTERN = r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$"
 
-MAX_REQUESTS_PER_MINUTE = 60
+MAX_REQUESTS_PER_MINUTE = 300
 MAX_AUTH_FAILURES = 5
 AUTH_FAILURE_WINDOW_SECONDS = 60
 AUTH_BLOCK_SECONDS = 300
