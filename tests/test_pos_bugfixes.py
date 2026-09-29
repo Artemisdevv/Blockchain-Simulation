@@ -164,6 +164,78 @@ def test_block_production_does_not_require_pending_transactions():
     assert FakeChain.instance.chain[1].creator == creator.public_key_pem
 
 
+# --- Bug 5: losing the VRF lottery never cleared stake state ---
+
+def test_losing_the_vrf_lottery_clears_stake_state():
+    """
+    Before the fix, the "You've lost" branch only reset staked_amt - it
+    never cleared current_stakers/current_stakes or bumped
+    last_epoch_end_ts, unlike every other exit path in create_blocks().
+    A losing staker's own Stake object stayed in current_stakes forever,
+    permanently deducting that amount from calc_balance() on every future
+    call (and inflating total_stake for every future epoch's threshold),
+    even though the coins were never actually spent.
+    """
+    loser = make_wallet()
+    whale = make_wallet()
+
+    genesis = make_block(None, [])
+    genesis.creator = loser.public_key_pem
+    genesis.sign = loser.private_key.sign(str(genesis).encode())
+
+    class FakeChain:
+        chain = [genesis]
+        instance = None
+
+        @property
+        def lastBlock(self):
+            return self.chain[-1]
+
+        def epoch_seed(self):
+            return "fixed-test-seed"
+
+        def transaction_exists_in_chain(self, tx):
+            return False
+    FakeChain.instance = FakeChain()
+
+    import consensus.pos.p2p as p2p_module
+    original_chain = p2p_module.Chain.instance
+    p2p_module.Chain.instance = FakeChain.instance
+    try:
+        peer = Peer.__new__(Peer)
+        peer.staker = True
+        peer.wallet = loser
+        peer.mem_pool = []
+        peer.mem_pool_lock = asyncio.Lock()
+        peer.file_hashes = {}
+        peer.file_hashes_lock = asyncio.Lock()
+        # Loser holds a vanishingly small share of total stake, so the VRF
+        # threshold is astronomically close to zero - a loss is certain
+        # without needing to mock the signature/hash.
+        peer.current_stakers = {
+            loser.public_key_pem: 1,
+            whale.public_key_pem: 10 ** 30,
+        }
+        peer.current_stakes = {"placeholder-stake-object"}
+        peer.staked_amt = 1
+        peer.curr_stakers_condition = asyncio.Condition()
+        peer.last_epoch_end_ts = None
+        peer.activate_disk_save = "n"
+        peer.server_connections = set()
+        peer.client_connections = set()
+        peer.seen_message_ids = set()
+
+        asyncio.run(peer.create_blocks(0))
+
+        assert peer.current_stakers == {}, "losing must clear current_stakers"
+        assert peer.current_stakes == set(), "losing must clear current_stakes"
+        assert peer.staked_amt == 0
+        assert peer.last_epoch_end_ts is not None, "losing must start the next epoch's timer"
+        assert len(FakeChain.instance.chain) == 1, "the loser must not have produced a block"
+    finally:
+        p2p_module.Chain.instance = original_chain
+
+
 if __name__ == "__main__":
     import sys
     sys.exit(pytest.main([__file__, "-v"]))

@@ -1533,7 +1533,10 @@ class Peer:
             threshold=(self.staked_amt/total_stake)*MAX_OUTPUT
             if(vrf_output_int>=threshold):
                 print("\nYou've lost\n")
+                self.last_epoch_end_ts=datetime.now()
                 self.staked_amt=0
+                self.current_stakers.clear()
+                self.current_stakes.clear()
                 return
             
             #The following code is for the winner
