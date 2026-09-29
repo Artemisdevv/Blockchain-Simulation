@@ -76,6 +76,24 @@ export async function fetchInvariants(connection: Connection): Promise<Invariant
   return apiRequest<InvariantsResponse>(connection, "/invariants");
 }
 
+export interface TriggerAttackResponse {
+  ok: boolean;
+  attack: string;
+  target_block_pos?: number;
+  message: string;
+  error?: string;
+}
+
+export async function triggerAttack(
+  connection: Connection,
+  attackType = "double_sign",
+): Promise<TriggerAttackResponse> {
+  return apiRequest<TriggerAttackResponse>(connection, "/malicious/trigger", {
+    method: "POST",
+    body: JSON.stringify({ attack_type: attackType }),
+  });
+}
+
 export async function submitTransaction(
   connection: Connection,
   receiver: string,
