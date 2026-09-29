@@ -355,11 +355,19 @@ def create_app(peer, loop, token, limiter: RateLimiter, auth_tracker: FailedAuth
             if tx.receiver == peer.wallet.public_key_pem
         )
 
+        # The one-time auto-stake faucet request, while it is still unconfirmed,
+        # so the UI can explain why pending shows more than the user requested.
+        auto_faucet_pending = sum(
+            tx.payload for tx in peer.mem_pool
+            if tx.id == getattr(peer, "auto_faucet_tx_id", None)
+        )
+
         spendable_balance = raw_balance if is_slashed else max(0, raw_balance)
         return jsonify({
             "public_key": peer.wallet.public_key_pem,
             "balance": spendable_balance,
             "pending_income": pending_income,
+            "auto_faucet_pending": auto_faucet_pending,
         })
 
     @app.post("/transactions")
@@ -415,6 +423,20 @@ def create_app(peer, loop, token, limiter: RateLimiter, auth_tracker: FailedAuth
         status = 200 if result.get("ok") else 400
         return jsonify(result), status
 
+    @app.get("/auto_stake")
+    def get_auto_stake():
+        return jsonify({"enabled": bool(peer.auto_stake), "available": bool(peer.staker)})
+
+    @app.post("/auto_stake")
+    def post_auto_stake():
+        if not peer.staker:
+            return jsonify({"ok": False, "error": "node is not a staker"}), 400
+        data = request.get_json(force=True, silent=True) or {}
+        if not isinstance(data.get("enabled"), bool):
+            return jsonify({"ok": False, "error": "enabled must be true or false"}), 400
+        peer.auto_stake = data["enabled"]
+        return jsonify({"ok": True, "enabled": peer.auto_stake, "available": True})
+
     faucet_limiter = RateLimiter(max_requests=10, window_seconds=3600)
 
     @app.post("/faucet")
@@ -436,39 +458,9 @@ def create_app(peer, loop, token, limiter: RateLimiter, auth_tracker: FailedAuth
         if amount <= 0 or amount > 500:
             return jsonify({"ok": False, "error": "Amount must be between 1 and 500"}), 400
 
-        from consensus.pos.blockchain_structures import Transaction
-        from shared_blockchain_structures import FAUCET_SIGNING_KEY
-        import base64, json
+        faucet_tx = peer.build_faucet_tx(amount)
 
-        faucet_tx = Transaction(amount, "Genesis", peer.wallet.public_key_pem)
-        # "Genesis" isn't a real keypair - sign with the well-known faucet
-        # key so other peers can verify this mint instead of trusting the
-        # sender string alone (see FAUCET_SIGNING_KEY's docstring).
-        faucet_tx.sign = FAUCET_SIGNING_KEY.sign(str(faucet_tx).encode())
-
-        async def _add_and_broadcast_faucet():
-            async with peer.mem_pool_lock:
-                peer.mem_pool.append(faucet_tx)
-            pkt = {
-                "type": "new_tx",
-                "id": faucet_tx.id,
-                "transaction": json.dumps(faucet_tx.to_dict()),
-                "sign": base64.b64encode(faucet_tx.sign).decode(),
-                "sender_pem": "Genesis"
-            }
-            # create_and_broadcast_tx registers its message id in
-            # seen_message_ids *before* broadcasting, so handle_messages'
-            # top-level "if id in self.seen_message_ids: return" catches
-            # it when a peer relays it back to us (handle_messages' new_tx
-            # branch always relays onward - in a full mesh that means it
-            # comes right back). This was missing here, so a relayed
-            # faucet broadcast would sail past that guard and get
-            # double-appended to our own mempool - doubling the amount
-            # shown as pending everywhere until it's mined.
-            peer.seen_message_ids.add(pkt["id"])
-            await peer.broadcast_message(pkt)
-
-        run_coro(_add_and_broadcast_faucet())
+        run_coro(peer.broadcast_faucet_tx(faucet_tx))
 
         new_balance = 0
         if Chain.instance:

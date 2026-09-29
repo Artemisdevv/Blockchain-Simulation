@@ -15,10 +15,6 @@ services:
       PEER_MANAGER_API_PROXY_TARGET: http://peer-manager:7001
       PEER_MANAGER_WS_PROXY_TARGET: http://peer-manager:7002
     depends_on:
-      peer-alice:
-        condition: service_healthy
-      peer-bob:
-        condition: service_started
       peer-manager:
         condition: service_started
     healthcheck:
@@ -80,6 +76,8 @@ services:
       - peer-manager-reports:/app/runtime_reports
 
   peer-alice:
+    # Opt-in demo node: docker compose --profile demo up
+    profiles: ["demo"]
     build:
       context: .
       dockerfile: Dockerfile.peer
@@ -105,6 +103,7 @@ services:
       ROOM_ID: demo
       MALICIOUS: "n"
       STAKER: "y"
+      AUTO_STAKE: "true"
       WEBAPI_TOKEN: demo-token-alice
       # web/vite.config.ts (via @lovable.dev/vite-tanstack-config) hardcodes
       # the dev server to port 8080, not Vite's usual 5173 default - keeping
@@ -127,6 +126,8 @@ services:
       start_period: 5s
 
   peer-bob:
+    # Opt-in demo node: docker compose --profile demo up
+    profiles: ["demo"]
     build:
       context: .
       dockerfile: Dockerfile.peer
@@ -150,6 +151,7 @@ services:
       ROOM_ID: demo
       MALICIOUS: "n"
       STAKER: "y"
+      AUTO_STAKE: "false"
       WEBAPI_TOKEN: demo-token-bob
       WEBAPI_CORS_ORIGINS: ${WEBAPI_CORS_ORIGINS:-http://localhost:8080,http://127.0.0.1:8080,http://localhost:5173,http://127.0.0.1:5173}
     ports:
@@ -157,6 +159,8 @@ services:
       - "6012:6001"
 
   peer-mallory:
+    # Opt-in demo node: docker compose --profile demo up
+    profiles: ["demo"]
     # Malicious node (mal_node.py) - double-signs to demo the slashing
     # detection fixed in issue #3. No web API on malicious peers by design
     # (see enable_api in start_peer.py), so no ports published here.
@@ -184,6 +188,8 @@ services:
       MALICIOUS: "y"
 
   peer-swarm:
+    # Opt-in demo node: docker compose --profile demo up
+    profiles: ["demo"]
     # Anonymous, scalable filler nodes for a "look, it handles N nodes"
     # moment - not part of the named demo story (that's alice/bob/mallory).
     # Run with: docker compose up --scale peer-swarm=10 -d

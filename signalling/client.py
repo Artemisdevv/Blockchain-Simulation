@@ -11,7 +11,8 @@ import websockets
 
 
 async def join_room(sig_host, sig_port, room_id, my_host, my_port, my_name, my_public_key,
-                     on_peer_joined=None, connect_retries=5, retry_delay_seconds=2):
+                     on_peer_joined=None, connect_retries=5, retry_delay_seconds=2,
+                     on_peer_left=None):
     """
     Joins `room_id` on the signalling server and returns the list of peers
     already registered in that room (empty list if we're first to join).
@@ -55,18 +56,20 @@ async def join_room(sig_host, sig_port, room_id, my_host, my_port, my_name, my_p
 
     listener_task = None
     if on_peer_joined:
-        listener_task = asyncio.create_task(_listen(websocket, on_peer_joined))
+        listener_task = asyncio.create_task(_listen(websocket, on_peer_joined, on_peer_left))
     else:
         await websocket.close()
 
     return initial_peers, listener_task
 
 
-async def _listen(websocket, on_peer_joined):
+async def _listen(websocket, on_peer_joined, on_peer_left=None):
     try:
         async for raw in websocket:
             msg = json.loads(raw)
             if msg.get("type") == "peer_joined":
                 on_peer_joined(msg["peer"])
+            elif msg.get("type") == "peer_left" and on_peer_left:
+                on_peer_left(msg["peer"])
     except websockets.exceptions.ConnectionClosed:
         pass

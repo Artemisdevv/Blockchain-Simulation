@@ -47,6 +47,25 @@ export async function startRoomPeer(config: RoomPeerRequest): Promise<RoomPeerRe
   return response.json() as Promise<RoomPeerResponse>;
 }
 
+/**
+ * Peer id of a connection created through the peer manager, or null for demo
+ * peers and spectator URLs (which have nothing to stop).
+ */
+export function peerIdFromConnection(connection: Connection): string | null {
+  const match = /^\/api\/runtime\/([0-9a-f]+)$/.exec(connection.url);
+  return match ? (match[1] ?? null) : null;
+}
+
+const PEER_GONE_MESSAGE = "Peer is no longer running.";
+
+/** The peer manager no longer has this peer (restarted, idle-reaped, or stopped). */
+export class PeerGoneError extends Error {
+  constructor() {
+    super(PEER_GONE_MESSAGE);
+    this.name = "PeerGoneError";
+  }
+}
+
 export async function stopRoomPeer(peerId: string): Promise<void> {
   const response = await fetch(`/api/peer-setup/peers/${encodeURIComponent(peerId)}`, {
     method: "DELETE",
@@ -122,6 +141,7 @@ export async function apiRequest<T>(
     } catch {
       // Ignore JSON parse error
     }
+    if (res.status === 404 && errorMessage === PEER_GONE_MESSAGE) throw new PeerGoneError();
     throw new Error(errorMessage);
   }
 
@@ -264,9 +284,29 @@ export async function requestFaucet(
   });
 }
 
+export interface AutoStakeResponse {
+  enabled: boolean;
+  available: boolean;
+}
+
+export async function fetchAutoStake(connection: Connection): Promise<AutoStakeResponse> {
+  return apiRequest<AutoStakeResponse>(connection, "/auto_stake");
+}
+
+export async function setAutoStake(
+  connection: Connection,
+  enabled: boolean,
+): Promise<AutoStakeResponse> {
+  return apiRequest<AutoStakeResponse>(connection, "/auto_stake", {
+    method: "POST",
+    body: JSON.stringify({ enabled }),
+  });
+}
+
 export interface WsEventHandlers {
   onBlockAppended?: (block: any) => void;
   onPeerDiscovered?: (peer: any) => void;
+  onPeerLeft?: (peer: any) => void;
   onStakeRegistered?: (data: { staker: string; amount: number }) => void;
   onNodeSlashed?: (event: NodeSlashedEvent) => void;
   onAttackState?: (event: Record<string, unknown>) => void;
@@ -324,6 +364,9 @@ export function connectEventsWs(
             break;
           case "peer_discovered":
             handlers.onPeerDiscovered?.(data.peer);
+            break;
+          case "peer_left":
+            handlers.onPeerLeft?.(data.peer);
             break;
           case "stake_registered":
             handlers.onStakeRegistered?.(data);

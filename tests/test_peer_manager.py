@@ -65,3 +65,48 @@ def test_create_endpoint_returns_runtime_config_for_pos_peer():
     assert response.status_code == 201
     assert response.json["peer_id"] == "abc123"
     assert response.json["token"] == "secret"
+
+
+def _manager():
+    return PeerManager(process_factory=FakeProcess, request_get=lambda *a, **k: FakeResponse())
+
+
+def test_stop_peer_frees_slot_and_port_for_reuse():
+    manager = _manager()
+    first = manager.start_peer("a", "room")
+    manager.stop_peer(first.peer_id)
+
+    assert first.process.returncode == 0
+    assert manager.get_peer(first.peer_id) is None
+    assert manager.start_peer("b", "room").port == first.port
+
+
+def test_manager_capacity_recovers_after_disconnects(monkeypatch):
+    monkeypatch.setattr("peer_manager.MAX_PEERS", 2)
+    manager = _manager()
+    a = manager.start_peer("a", "room")
+    manager.start_peer("b", "room")
+    with pytest.raises(RuntimeError, match="full"):
+        manager.start_peer("c", "room")
+    manager.stop_peer(a.peer_id)
+    manager.start_peer("c", "room")
+
+
+def test_idle_peer_is_reaped(monkeypatch):
+    monkeypatch.setattr("peer_manager.IDLE_TIMEOUT", 0)
+    manager = _manager()
+    peer = manager.start_peer("a", "room")
+    manager.start_peer("b", "room")
+
+    assert peer.process.returncode == 0
+    assert peer.peer_id not in manager.peers
+
+
+def test_delete_endpoint_stops_peer_then_404s():
+    manager = _manager()
+    peer = manager.start_peer("a", "room")
+    client = create_app(manager)[0].test_client()
+
+    assert client.delete(f"/peers/{peer.peer_id}").status_code == 200
+    assert peer.process.returncode == 0
+    assert client.delete(f"/peers/{peer.peer_id}").status_code == 404

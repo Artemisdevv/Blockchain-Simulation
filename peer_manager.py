@@ -35,6 +35,8 @@ import websockets
 BASE_PORT = int(os.environ.get("PEER_MANAGER_BASE_PORT", "5100"))
 PORT_STEP = int(os.environ.get("PEER_MANAGER_PORT_STEP", "100"))
 MAX_PEERS = int(os.environ.get("PEER_MANAGER_MAX_PEERS", "9"))
+# Peers whose dashboard has not touched the API for this long are stopped.
+IDLE_TIMEOUT = float(os.environ.get("PEER_MANAGER_IDLE_TIMEOUT", "120"))
 PEER_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,31}$")
 ROOM_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
 PROJECT_ROOT = Path(__file__).resolve().parent
@@ -154,6 +156,7 @@ class ManagedPeer:
     port: int
     token: str
     process: subprocess.Popen
+    last_seen: float = 0.0
 
 
 class PeerManager:
@@ -163,6 +166,7 @@ class PeerManager:
         self.peers: dict[str, ManagedPeer] = {}
         self._lock = threading.Lock()
         self._next_port = BASE_PORT
+        self._free_ports: list[int] = []
         self.runs = {}
         self.event_loop = None
         self.collector_futures = []
@@ -201,8 +205,11 @@ class PeerManager:
             if any(peer.name.lower() == name.lower() for peer in self.peers.values()):
                 raise ValueError(f"A managed peer named '{name}' is already running.")
 
-            port = self._next_port
-            self._next_port += PORT_STEP
+            if self._free_ports:
+                port = self._free_ports.pop(0)
+            else:
+                port = self._next_port
+                self._next_port += PORT_STEP
             peer_id = uuid.uuid4().hex
             token = secrets.token_urlsafe(32)
             env = os.environ.copy()
@@ -220,6 +227,10 @@ class PeerManager:
                 "ROOM_ID": room_id,
                 "MALICIOUS": "n",
                 "STAKER": "y",
+                # Off by default: with several auto-stakers a node can still fall a
+                # block behind. Flip it on per node from the dashboard toggle.
+                "AUTO_STAKE": "false",
+                "PYTHONUNBUFFERED": "1",
                 "WEBAPI_HOST": "0.0.0.0",
                 "WEBAPI_TOKEN": token,
             })
@@ -228,7 +239,7 @@ class PeerManager:
                 cwd=str(PROJECT_ROOT),
                 env=env,
             )
-            managed = ManagedPeer(peer_id, name, room_id, port, token, process)
+            managed = ManagedPeer(peer_id, name, room_id, port, token, process, time.monotonic())
             self.peers[peer_id] = managed
             run = self.begin_run(room_id)
             run.participants[peer_id] = {"peer_id": peer_id, "name": name, "first_seen_at": time.time(), "last_seen_at": time.time()}
@@ -365,34 +376,53 @@ class PeerManager:
             time.sleep(0.1)
         return False
 
+    def _release(self, peer):
+        self.peers.pop(peer.peer_id, None)
+        if peer.port not in self._free_ports:
+            self._free_ports.append(peer.port)
+
     def _reap_exited(self):
-        for peer_id, peer in list(self.peers.items()):
+        now = time.monotonic()
+        for peer in list(self.peers.values()):
             if peer.process.poll() is not None:
-                self.peers.pop(peer_id, None)
+                self._release(peer)
                 run = self.runs.get(peer.room_id)
-                participant = next((item for item in run.participants.values() if item.get("peer_id") == peer_id or item is run.participants.get(peer_id)), None) if run else None
+                participant = run.participants.get(peer.peer_id) if run else None
                 if participant:
                     participant["last_seen_at"] = time.time()
                     run.persist()
+            elif now - peer.last_seen > IDLE_TIMEOUT:
+                # Dashboard went away without disconnecting (tab closed, crash).
+                self._release(peer)
+                self._terminate(peer)
 
-    def get_peer(self, peer_id):
-        with self._lock:
-            peer = self.peers.get(peer_id)
-            if peer and peer.process.poll() is not None:
-                self.peers.pop(peer_id, None)
-                return None
-            return peer
-
-    def stop_peer(self, peer_id):
-        with self._lock:
-            peer = self.peers.pop(peer_id, None)
-        if peer and peer.process.poll() is None:
+    @staticmethod
+    def _terminate(peer):
+        if peer.process.poll() is None:
             peer.process.terminate()
             try:
                 peer.process.wait(timeout=5)
             except subprocess.TimeoutExpired:
                 peer.process.kill()
-        return peer is not None
+
+    def get_peer(self, peer_id):
+        with self._lock:
+            peer = self.peers.get(peer_id)
+            if peer and peer.process.poll() is not None:
+                self._release(peer)
+                return None
+            if peer:
+                peer.last_seen = time.monotonic()
+            return peer
+
+    def stop_peer(self, peer_id):
+        with self._lock:
+            peer = self.peers.get(peer_id)
+            if peer:
+                self._release(peer)
+        if peer:
+            self._terminate(peer)
+        return peer
 
     def stop_all(self):
         with self._lock:
@@ -420,6 +450,13 @@ def create_app(manager=None):
             "room_id": peer.room_id,
             "token": peer.token,
         }), 201
+
+    @app.delete("/peers/<peer_id>")
+    def delete_peer(peer_id):
+        # No per-peer token: the Attack Lab stops *other* managed nodes by id.
+        if not manager.stop_peer(peer_id):
+            return jsonify({"error": "Peer is no longer running."}), 404
+        return jsonify({"stopped": peer_id}), 200
 
     @app.get("/peers")
     def list_peers():
@@ -504,12 +541,6 @@ def create_app(manager=None):
         output = io.BytesIO()
         build_report_pdf(report, output)
         return Response(output.getvalue(), content_type="application/pdf", headers={"Content-Disposition": f"attachment; filename=run-{run.run_id}.pdf"})
-
-    @app.delete("/peers/<peer_id>")
-    def delete_peer(peer_id):
-        if not manager.stop_peer(peer_id):
-            return jsonify({"ok": False, "error": "Managed peer not found"}), 404
-        return jsonify({"ok": True})
 
     @app.route("/api/runtime/<peer_id>", defaults={"path": ""}, methods=["GET", "POST", "OPTIONS"])
     @app.route("/api/runtime/<peer_id>/<path:path>", methods=["GET", "POST", "OPTIONS"])
@@ -601,6 +632,8 @@ async def run_ws_proxy(manager, websocket):
         async with websockets.connect(upstream_url) as upstream:
             async def relay(source, target, capture=False):
                 async for message in source:
+                    if not spectator:
+                        peer.last_seen = time.monotonic()
                     if capture:
                         try:
                             manager.record_event(room_id, json.loads(message), peer["name"])

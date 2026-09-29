@@ -203,10 +203,14 @@ async def run_peer(peer, action, bootstrap_host, bootstrap_port,
         def on_new_peer(peer_info):
             asyncio.create_task(peer.connect_to_peer(peer_info["host"], int(peer_info["port"])))
 
+        def on_peer_gone(peer_info):
+            asyncio.create_task(peer.handle_peer_left(peer_info["host"], int(peer_info["port"])))
+
         initial_peers, _ = await join_room(
             signalling_host, signalling_port, room_id,
             peer.host, peer.port, peer.name, peer.wallet.public_key_pem,
             on_peer_joined=on_new_peer,
+            on_peer_left=on_peer_gone,
         )
 
         if initial_peers:

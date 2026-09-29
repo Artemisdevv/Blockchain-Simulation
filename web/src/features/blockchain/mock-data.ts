@@ -49,6 +49,7 @@ export interface BalanceResponse {
   public_key: string;
   balance: number;
   pending_income?: number;
+  auto_faucet_pending?: number;
 }
 export interface TransactionResponse {
   ok: true;

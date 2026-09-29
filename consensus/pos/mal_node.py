@@ -3,7 +3,7 @@ import argparse, json, uuid, base64
 import threading, socket, os, subprocess
 from datetime import datetime, timedelta
 from typing import Set, Dict, List, Tuple, Any
-from consensus.pos.blockchain_structures import Transaction, Stake, Block, Wallet, Chain, isvalidChain, weight_of_chain
+from consensus.pos.blockchain_structures import Transaction, Stake, Block, Wallet, Chain, isvalidChain, weight_of_chain, elect_leader
 from shared_blockchain_structures import FAUCET_VERIFYING_KEY
 from ipfs.ipfs import addToIpfs, download_ipfs_file_subprocess
 from smart_contract.contracts_db import SmartContractDatabase
@@ -253,7 +253,7 @@ class Peer:
                 transaction.sign=base64.b64decode(transaction_dict["sign"])
             transactions.append(transaction)
         
-        if(not(new_block_id and new_block_ts and transactions)): # Genesis block doesn't have prevHash, it's an empty string
+        if(not(new_block_id and new_block_ts)): # empty blocks are valid (see p2p.py) # Genesis block doesn't have prevHash, it's an empty string
             return None
         
         newBlock=Block(new_block_prevHash, transactions, new_block_ts, new_block_id)   
@@ -640,9 +640,11 @@ class Peer:
                     print(f"\nSome stakes may have been ignored stakes_in_block 1:{total_amt_staked} 2:{total_amt_staked_2}\n")
                     return
 
-                threshold=(staked_amt/total_amt_staked_2) * MAX_OUTPUT
-                if(vrf_output_int>=threshold):
-                    raise VrfThresholdException("VRF_Output is not less than threshold")
+                block_stakes={}
+                for stake in newBlock.stakers:
+                    block_stakes[stake.staker]=block_stakes.get(stake.staker, 0)+stake.amt
+                if(elect_leader(Chain.instance.epoch_seed(), block_stakes)!=msg["block"]["creator"]):
+                    raise VrfThresholdException("creator is not the elected leader")
                 newBlock.seed=Chain.instance.epoch_seed()
                 newBlock.vrf_output=vrf_output
                 newBlock.vrf_proof=vrf_proof
@@ -1367,8 +1369,7 @@ class Peer:
             total_stake=sum(self.current_stakers.values())
 
 
-            threshold=(self.staked_amt/total_stake)*MAX_OUTPUT
-            if(vrf_output_int>=threshold):
+            if(elect_leader(seed, self.current_stakers)!=self.wallet.public_key_pem):
                 print("\nYou've lost\n")
                 self.staked_amt=0
                 return

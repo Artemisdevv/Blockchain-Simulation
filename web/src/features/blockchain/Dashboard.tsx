@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import {
   Activity,
   Download,
@@ -25,8 +25,9 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import { BlockDialog, TransactionDialog } from "./DetailDialog";
-import { CopyValue, formatTime, shortKey } from "./utils";
+import { CopyValue, formatTime, normKey, shortKey } from "./utils";
 import {
   connectEventsWs,
   fetchAttackLabState,
@@ -37,6 +38,8 @@ import {
   fetchMempool,
   fetchPeers,
   fetchStakers,
+  fetchAutoStake,
+  setAutoStake,
   downloadRunReport,
   healPeerPartition,
   listManagedPeers,
@@ -48,6 +51,7 @@ import {
   submitStake,
   submitTransaction,
   triggerAttack,
+  PeerGoneError,
   type Connection,
   type InvariantsResponse,
   type AttackLabState,
@@ -90,6 +94,10 @@ export function Dashboard({
   // Live state from container
   const [chain, setChain] = useState<ChainResponse>({ blocks: [] });
   const [peers, setPeers] = useState<PeersResponse>({ peers: [] });
+  const [autoStake, setAutoStakeState] = useState<{ enabled: boolean; available: boolean }>({
+    enabled: false,
+    available: false,
+  });
   const [mempool, setMempool] = useState<MempoolResponse>({ transactions: [] });
   const [stakers, setStakers] = useState<StakersResponse>({
     stakers: {},
@@ -131,9 +139,15 @@ export function Dashboard({
       setCountdown(s.epoch_ends_in_seconds);
       setLastUpdate(new Date());
     } catch (err: any) {
+      if (err instanceof PeerGoneError) {
+        // The peer process is gone (manager restarted, idle-reaped). Don't sit on a
+        // dashboard of zeros: go back to the join screen so the user can rejoin.
+        onDisconnect();
+        return;
+      }
       console.error("Failed to fetch node state:", err);
     }
-  }, [connection, isSpectator]);
+  }, [connection, isSpectator, onDisconnect]);
 
   // Initial load & lightweight background refresh (30s cadence since WebSocket streams live updates)
   useEffect(() => {
@@ -141,6 +155,22 @@ export function Dashboard({
     const interval = window.setInterval(refreshAll, 30000);
     return () => window.clearInterval(interval);
   }, [refreshAll]);
+
+  useEffect(() => {
+    fetchAutoStake(connection)
+      .then(setAutoStakeState)
+      .catch(() => setAutoStakeState({ enabled: false, available: false }));
+  }, [connection]);
+
+  const toggleAutoStake = async (enabled: boolean) => {
+    try {
+      const res = await setAutoStake(connection, enabled);
+      setAutoStakeState({ enabled: res.enabled, available: res.available });
+      setToast(enabled ? "Auto-stake on: this node stakes each epoch." : "Auto-stake off: stake manually.");
+    } catch (err: any) {
+      setToast(err.message || "Failed to change auto-stake.");
+    }
+  };
 
   // WebSocket Live Events
   useEffect(() => {
@@ -154,6 +184,10 @@ export function Dashboard({
       },
       onPeerDiscovered: (peer) => {
         setToast(`Peer discovered: ${peer.name || peer.host}`);
+        fetchPeers(connection).then(setPeers);
+      },
+      onPeerLeft: (peer) => {
+        setToast(`Peer left: ${peer.name || peer.host}`);
         fetchPeers(connection).then(setPeers);
       },
       onStakeRegistered: (data) => {
@@ -193,9 +227,11 @@ export function Dashboard({
   const getName = useCallback(
     (pubkey: string): string => {
       if (!pubkey) return "Unknown";
-      if (pubkey === balance.public_key) return "You";
+      const cleanPubkey = normKey(pubkey);
+      const cleanSelf = balance.public_key ? normKey(balance.public_key) : "";
+      if (cleanSelf && cleanPubkey === cleanSelf) return "You";
       if (pubkey === "Genesis") return "Genesis";
-      const match = peers.peers.find((p) => p.public_key === pubkey);
+      const match = peers.peers.find((p) => p.public_key && normKey(p.public_key) === cleanPubkey);
       if (match) return match.name;
       return shortKey(pubkey);
     },
@@ -330,6 +366,12 @@ export function Dashboard({
                 </Button>}
                 {!isSpectator && (
                   <>
+                    {autoStake.available && (
+                      <label className="flex items-center gap-2 rounded-md border border-border bg-card px-3 py-2 text-sm">
+                        <Switch checked={autoStake.enabled} onCheckedChange={toggleAutoStake} />
+                        Auto-stake
+                      </label>
+                    )}
                     <Button
                       variant="outline"
                       onClick={async () => {
@@ -565,7 +607,9 @@ function Overview({
       "Balance",
       isSpectator ? "—" : `${balance.balance} coins`,
       isSpectator ? "No peer wallet is attached" : balance.pending_income
-        ? `+${balance.pending_income} pending confirmation`
+        ? `+${balance.pending_income} pending confirmation${
+            balance.auto_faucet_pending ? ` (incl. ${balance.auto_faucet_pending} auto-faucet)` : ""
+          }`
         : "Your wallet balance",
     ],
     [Clock3, "Epoch Ends In", `${countdown}s`, "Next block selection"],
@@ -900,24 +944,30 @@ function TransactionTable({
   );
 }
 
+type Pt = { x: number; y: number };
+
 function NetworkPanel({ peers, selfPk }: { peers: PeersResponse; selfPk: string }) {
   const peerList = peers.peers;
+  const canvasRef = useRef<HTMLDivElement>(null);
+  // Positions are fractions (0..1) of the canvas so lines and cards always
+  // share one coordinate space. Dragged cards override the default layout.
+  const [moved, setMoved] = useState<Record<string, Pt>>({});
+  const [dragging, setDragging] = useState<string | null>(null);
+
+  const keyOf = (peer: PeersResponse["peers"][number]) => `${peer.name}@${peer.host}:${peer.port}`;
 
   // The signalling server's whole purpose is peers connecting directly to
   // each other, forming a mesh - so the honest topology for any known peer
   // list is a complete graph (every peer <-> every other peer), not
   // something we need a separate connection-pair endpoint to discover.
-  const size = 440;
-  const center = size / 2;
-  const radius = size / 2 - 70;
-  const positions = peerList.map((_, i) => {
-    const angle = (2 * Math.PI * i) / Math.max(peerList.length, 1) - Math.PI / 2;
-    return {
-      x: center + radius * Math.cos(angle),
-      y: center + radius * Math.sin(angle),
-    };
+  const positions: Pt[] = peerList.map((peer, i) => {
+    const custom = moved[keyOf(peer)];
+    if (custom) return custom;
+    if (peerList.length === 1) return { x: 0.5, y: 0.5 };
+    const angle = (2 * Math.PI * i) / peerList.length - Math.PI / 2;
+    return { x: 0.5 + 0.34 * Math.cos(angle), y: 0.5 + 0.34 * Math.sin(angle) };
   });
-  const edges: Array<{ key: string; from: { x: number; y: number }; to: { x: number; y: number } }> = [];
+  const edges: Array<{ key: string; from: Pt; to: Pt }> = [];
   for (let i = 0; i < positions.length; i++) {
     for (let j = i + 1; j < positions.length; j++) {
       const from = positions[i];
@@ -926,26 +976,32 @@ function NetworkPanel({ peers, selfPk }: { peers: PeersResponse; selfPk: string 
     }
   }
 
+  const dragTo = (key: string, clientX: number, clientY: number) => {
+    const rect = canvasRef.current?.getBoundingClientRect();
+    if (!rect || !rect.width || !rect.height) return;
+    const clamp = (v: number) => Math.min(0.95, Math.max(0.05, v));
+    setMoved((prev) => ({
+      ...prev,
+      [key]: { x: clamp((clientX - rect.left) / rect.width), y: clamp((clientY - rect.top) / rect.height) },
+    }));
+  };
+
   return (
     <div className="grid gap-6 xl:grid-cols-[1.1fr_1fr]">
       <section className="panel overflow-hidden">
         <PanelHeading
           title="Peer Mesh Topology"
-          detail={`Full mesh - every peer connects directly to every other peer (${edges.length} link${edges.length === 1 ? "" : "s"})`}
+          detail={`Full mesh - every peer connects directly to every other peer (${edges.length} link${edges.length === 1 ? "" : "s"}). Drag nodes to rearrange.`}
         />
-        <div className="relative h-[440px] overflow-hidden bg-grid">
-          <svg
-            viewBox={`0 0 ${size} ${size}`}
-            className="absolute inset-0 h-full w-full"
-            preserveAspectRatio="xMidYMid meet"
-          >
+        <div ref={canvasRef} className="relative h-[440px] touch-none select-none overflow-hidden bg-grid">
+          <svg className="absolute inset-0 h-full w-full">
             {edges.map(({ key, from, to }) => (
               <line
                 key={key}
-                x1={from.x}
-                y1={from.y}
-                x2={to.x}
-                y2={to.y}
+                x1={`${from.x * 100}%`}
+                y1={`${from.y * 100}%`}
+                x2={`${to.x * 100}%`}
+                y2={`${to.y * 100}%`}
                 className="stroke-border"
                 strokeWidth={1.5}
               />
@@ -955,15 +1011,27 @@ function NetworkPanel({ peers, selfPk }: { peers: PeersResponse; selfPk: string 
             const isSelf = peer.public_key === selfPk;
             const pos = positions[i];
             if (!pos) return null;
+            const key = keyOf(peer);
             return (
               <div
-                key={peer.name + peer.host}
-                className={`absolute flex w-28 -translate-x-1/2 -translate-y-1/2 flex-col items-center justify-center rounded-lg border p-3 text-center shadow-sm transition-all ${
+                key={key}
+                onPointerDown={(e) => {
+                  e.currentTarget.setPointerCapture(e.pointerId);
+                  setDragging(key);
+                }}
+                onPointerMove={(e) => {
+                  if (dragging === key) dragTo(key, e.clientX, e.clientY);
+                }}
+                onPointerUp={() => setDragging(null)}
+                onPointerCancel={() => setDragging(null)}
+                className={`absolute flex w-28 -translate-x-1/2 -translate-y-1/2 flex-col items-center justify-center rounded-lg border p-3 text-center shadow-sm ${
+                  dragging === key ? "z-10 cursor-grabbing shadow-lg" : "cursor-grab"
+                } ${
                   isSelf
                     ? "border-primary bg-primary/10 font-semibold"
                     : "border-border bg-card hover:border-primary/50"
                 }`}
-                style={{ left: `${(pos.x / size) * 100}%`, top: `${(pos.y / size) * 100}%` }}
+                style={{ left: `${pos.x * 100}%`, top: `${pos.y * 100}%` }}
               >
                 <Server className={`h-6 w-6 ${isSelf ? "text-primary" : "text-muted-foreground"}`} />
                 <div className="mt-1.5 text-xs font-medium">{peer.name}</div>
@@ -974,25 +1042,6 @@ function NetworkPanel({ peers, selfPk }: { peers: PeersResponse; selfPk: string 
               </div>
             );
           })}
-        </div>
-      </section>
-
-      <section className="col-span-full panel p-5 bg-card">
-        <div className="flex items-start gap-4">
-          <div className="grid h-10 w-10 place-items-center rounded-lg bg-primary/10 text-primary shrink-0">
-            <Server className="h-5 w-5" />
-          </div>
-          <div>
-            <h3 className="text-sm font-semibold text-foreground">Dynamic Swarm Node Scaling</h3>
-            <p className="mt-1 text-xs text-muted-foreground leading-relaxed">
-              Scale network nodes on demand using Docker Compose. Every new replica auto-detects its container IP and bootstraps into room <code className="rounded bg-muted px-1.5 py-0.5 text-primary">demo</code> via the Signalling Server.
-            </p>
-            <div className="mt-3 flex items-center gap-2">
-              <code className="rounded bg-muted px-2 py-1 font-mono text-xs text-foreground select-all">
-                docker compose up -d --scale peer-swarm=5
-              </code>
-            </div>
-          </div>
         </div>
       </section>
 
@@ -1348,7 +1397,7 @@ function AttackLab({
     fetchAttackLabState(connection).then(setAttackState).catch(() => {});
     listManagedPeers().then((items) => {
       setManagedPeers(items);
-      if (items.length) setSelectedManagedPeer(items[0].peer_id);
+      if (items[0]) setSelectedManagedPeer(items[0].peer_id);
     }).catch(() => setManagedPeers([]));
   }, [connection]);
 
