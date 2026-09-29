@@ -37,10 +37,20 @@ function Index() {
     const qUrl = params.get("url");
     const qToken = params.get("token");
     const qWsUrl = params.get("wsUrl");
+    const spectatorToken = params.get("spectatorToken");
 
     let autoConn: Connection | null = null;
 
-    if (qNode) {
+    if (params.get("mode") === "spectator" && spectatorToken) {
+      autoConn = {
+        url: `/api/peer-setup/spectator/${encodeURIComponent(spectatorToken)}`,
+        token: spectatorToken,
+        wsUrl: `/ws/runtime/spectator/${encodeURIComponent(spectatorToken)}/events`,
+        readOnly: true,
+      };
+    }
+
+    if (!autoConn && qNode) {
       autoConn = resolveNodeByName(qNode);
     }
     if (!autoConn && qUrl && qToken) {

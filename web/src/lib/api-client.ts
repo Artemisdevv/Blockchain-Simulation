@@ -13,6 +13,7 @@ export interface Connection {
   url: string;
   token: string;
   wsUrl?: string | undefined;
+  readOnly?: boolean;
 }
 
 export interface RoomPeerRequest {
@@ -66,6 +67,36 @@ export async function listManagedPeers(): Promise<ManagedPeerSummary[]> {
   if (!response.ok) throw new Error(`Failed to load managed peers (HTTP ${response.status}).`);
   const data = (await response.json()) as { peers: ManagedPeerSummary[] };
   return data.peers;
+}
+
+export async function createSpectatorLink(roomId: string, issuerToken: string): Promise<string> {
+  const response = await fetch("/api/peer-setup/spectator-links", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Spectator-Issuer": issuerToken },
+    body: JSON.stringify({ room_id: roomId }),
+  });
+  const data = await response.json();
+  if (!response.ok) throw new Error(data?.error || `Unable to create spectator link (HTTP ${response.status}).`);
+  const url = new URL(window.location.origin);
+  url.searchParams.set("mode", "spectator");
+  url.searchParams.set("room", roomId);
+  url.searchParams.set("spectatorToken", data.spectator_token);
+  return url.toString();
+}
+
+export async function downloadRunReport(connection: Connection): Promise<void> {
+  const baseUrl = connection.url.replace(/\/+$/, "");
+  const response = await fetch(`${baseUrl}/report.pdf`, {
+    headers: { Authorization: `Bearer ${connection.token}` },
+  });
+  if (!response.ok) throw new Error(`Could not export the run report (HTTP ${response.status}).`);
+  const blob = await response.blob();
+  const href = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = href;
+  anchor.download = "blockchain-run-report.pdf";
+  anchor.click();
+  URL.revokeObjectURL(href);
 }
 
 export async function apiRequest<T>(
@@ -238,6 +269,7 @@ export interface WsEventHandlers {
   onPeerDiscovered?: (peer: any) => void;
   onStakeRegistered?: (data: { staker: string; amount: number }) => void;
   onNodeSlashed?: (event: NodeSlashedEvent) => void;
+  onAttackState?: (event: Record<string, unknown>) => void;
   onOpen?: () => void;
   onError?: (err: Event) => void;
   onClose?: () => void;
@@ -270,18 +302,23 @@ export function connectEventsWs(
     url.searchParams.set("token", connection.token);
     const wsUrl = url.toString();
 
-    const ws = new WebSocket(wsUrl);
+    let ws: WebSocket | null = null;
+    let active = true;
+    let retry = 0;
+    let timer = 0;
+    const connect = () => {
+      if (!active) return;
+      ws = new WebSocket(wsUrl);
+      ws.onopen = () => {
+        retry = 0;
+        handlers.onOpen?.();
+      };
+      ws.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          if (!data || !data.type) return;
 
-    ws.onopen = () => {
-      handlers.onOpen?.();
-    };
-
-    ws.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data);
-        if (!data || !data.type) return;
-
-        switch (data.type) {
+          switch (data.type) {
           case "block_appended":
             handlers.onBlockAppended?.(data.block);
             break;
@@ -298,22 +335,29 @@ export function connectEventsWs(
               block_pos: data.block_pos,
             });
             break;
+          case "attack_state":
+            handlers.onAttackState?.(data);
+            break;
+          }
+        } catch (err) {
+          console.error("Failed to parse WS message:", err);
         }
-      } catch (err) {
-        console.error("Failed to parse WS message:", err);
-      }
+      };
+      ws.onerror = (err) => handlers.onError?.(err);
+      ws.onclose = () => {
+        handlers.onClose?.();
+        if (active) {
+          const delay = Math.min(30000, 1000 * 2 ** retry++);
+          timer = window.setTimeout(connect, delay);
+        }
+      };
     };
-
-    ws.onerror = (err) => {
-      handlers.onError?.(err);
-    };
-
-    ws.onclose = () => {
-      handlers.onClose?.();
-    };
+    connect();
 
     return () => {
-      ws.close();
+      active = false;
+      window.clearTimeout(timer);
+      ws?.close();
     };
   } catch (err) {
     console.error("Failed to initialize WebSocket:", err);

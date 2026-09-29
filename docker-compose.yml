@@ -72,6 +72,12 @@ services:
       PEER_MANAGER_BASE_PORT: "5100"
       PEER_MANAGER_PORT_STEP: "100"
       PEER_MANAGER_MAX_PEERS: "9"
+      PEER_MANAGER_ROOM_PEERS: '[{"room_id":"demo","name":"alice","base_url":"http://peer-alice:6000","token":"demo-token-alice"},{"room_id":"demo","name":"bob","base_url":"http://peer-bob:6000","token":"demo-token-bob"}]'
+      SPECTATOR_SIGNING_KEY: ${SPECTATOR_SIGNING_KEY:-}
+      SPECTATOR_ISSUER_TOKEN: ${SPECTATOR_ISSUER_TOKEN:-}
+      RUN_REPORT_DIR: /app/runtime_reports
+    volumes:
+      - peer-manager-reports:/app/runtime_reports
 
   peer-alice:
     build:
@@ -208,3 +214,6 @@ services:
       ROOM_ID: demo
       MALICIOUS: "n"
       STAKER: "n"
+
+volumes:
+  peer-manager-reports:
