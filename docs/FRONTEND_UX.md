@@ -17,6 +17,10 @@ that node's [web API](API.md).
    "Fork resolved: switched to the network chain (6 → 7 blocks)". If the peer disappears (manager restarted, idle
    timeout) the dashboard returns to the join screen instead of showing zeros.
 
+**+50 Test Coins** only queues a faucet transaction: the coins arrive with the next block (the toast says how long),
+and the button reads "Coins pending..." until then. The mempool, pending balance and stake-adjusted balance update as
+soon as a transaction or stake is seen, not only on the 30 second refresh.
+
 Header actions: **Tour**, **Share spectator link**, **Auto-stake** switch, **+50 Test Coins**, **Send
 transaction**, **Add stake**. They wrap onto several lines on narrow screens.
 
@@ -29,7 +33,7 @@ transaction**, **Add stake**. They wrap onto several lines on narrow screens.
 | **Network** | Peer mesh topology. Drag nodes to rearrange. A **Genesis** (faucet) node sits in the middle: faucet coins fly from it to the requesting node. A transfer (blue) flies from sender to receiver; stakes (amber) and new blocks (green) fly from the staker or winner to every other node. Known peers list below |
 | **Validators** | Leaderboard with each staker's win probability, the stake form (shows your chance of being picked as you type), and **Why is this node next?**: the stake-weighted draw drawn as slices of a line with the hash "pick" marked, plus who won the last epoch |
 | **Mempool** | Pending transactions (paged, 8 per page) and the send form (receiver is a peer name) |
-| **Chaos Lab** | Fault injection on your own node: kill a managed node, partition the network, add outbound latency, censor a recipient. Shows the malicious nodes currently running |
+| **Chaos Lab** | Fault injection on your own node: kill a managed node (only nodes in your room are listed), partition the network, add outbound latency, censor a recipient. Shows the malicious nodes currently running. While any fault is active a **Chaos active on this node** banner appears on every tab, and with latency on, your own packets wait at your node for that long before they fly |
 
 ## Roles and attacks
 

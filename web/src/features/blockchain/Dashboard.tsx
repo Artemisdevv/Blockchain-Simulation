@@ -103,11 +103,16 @@ export function Dashboard({
   const [packets, setPackets] = useState<Packet[]>([]);
   const packetSeq = useRef(0);
   // toKey set: the dot travels to that one node (transfers, faucet). Unset: it fans out to every other node.
+  // Attack Lab latency holds back this node's own outgoing traffic; the dots show that wait.
+  const latencyRef = useRef(0);
+  const selfKeyRef = useRef("");
   const addPacket = useCallback((kind: PacketKind, fromKey?: string, toKey?: string) => {
     if (!fromKey) return;
     const id = ++packetSeq.current;
-    setPackets((current) => [...current.slice(-40), { id, kind, fromKey, toKey }]);
-    window.setTimeout(() => setPackets((current) => current.filter((p) => p.id !== id)), 2600);
+    const isOwn = Boolean(selfKeyRef.current) && normKey(fromKey) === normKey(selfKeyRef.current);
+    const delayMs = isOwn ? latencyRef.current : 0;
+    setPackets((current) => [...current.slice(-40), { id, kind, fromKey, toKey, delayMs }]);
+    window.setTimeout(() => setPackets((current) => current.filter((p) => p.id !== id)), 2600 + delayMs);
   }, []);
   const [autoStake, setAutoStakeState] = useState<{ enabled: boolean; available: boolean }>({
     enabled: false,
@@ -139,6 +144,19 @@ export function Dashboard({
   // Spectator mode detection
   const isSpectator = connection.readOnly === true;
   const [attackEvent, setAttackEvent] = useState<any>(null);
+  // What the Attack Lab currently does to this node (shown as a banner so faults are visible).
+  const [attackLab, setAttackLab] = useState<AttackLabState>({ blocked_peers: [], latency_ms: 0, censored_receivers: [] });
+  latencyRef.current = attackLab.latency_ms;
+  selfKeyRef.current = balance.public_key;
+  const refreshAttackLab = useCallback(() => {
+    if (isSpectator) return;
+    fetchAttackLabState(connection).then(setAttackLab).catch(() => {});
+  }, [connection, isSpectator]);
+  useEffect(() => {
+    refreshAttackLab();
+    const interval = window.setInterval(refreshAttackLab, 30000);
+    return () => window.clearInterval(interval);
+  }, [refreshAttackLab]);
   // A transaction entering the mempool only needs the mempool and balance, not a full refresh.
   // Coalesced so a burst (several faucet requests) costs one fetch.
   const pendingRefreshTimer = useRef<number | undefined>(undefined);
@@ -249,7 +267,10 @@ export function Dashboard({
         setToast(`MALICIOUS ACTIVITY DETECTED: ${event.creator ? getNameRef.current(event.creator) : "a validator"} double-signed and was slashed!`);
         refreshAll();
       },
-      onAttackState: (event) => setAttackEvent(event),
+      onAttackState: (event) => {
+        setAttackEvent(event);
+        refreshAttackLab();
+      },
       onResyncStarted: () => setToast("Out of sync with the network: requesting chains from peers to catch up..."),
       onChainReplaced: (event) => {
         setToast(`Fork resolved: switched to the network chain (${event.old_length} → ${event.new_length} blocks).`);
@@ -258,7 +279,7 @@ export function Dashboard({
     });
 
     return () => unsubscribe();
-  }, [connection, refreshAll, refreshPending, addPacket]);
+  }, [connection, refreshAll, refreshPending, refreshAttackLab, addPacket]);
 
   // Countdown timer decrement
   useEffect(() => {
@@ -285,6 +306,11 @@ export function Dashboard({
   // The events effect below subscribes once per connection; the ref keeps its toasts using the latest names.
   const getNameRef = useRef(getName);
   getNameRef.current = getName;
+
+  const activeFaults: string[] = [];
+  if (attackLab.latency_ms > 0) activeFaults.push(`Latency: this node's broadcasts are delayed ${attackLab.latency_ms} ms`);
+  if (attackLab.blocked_peers.length > 0) activeFaults.push(`Partition: cut off from ${attackLab.blocked_peers.map(getName).join(", ")}`);
+  if (attackLab.censored_receivers.length > 0) activeFaults.push(`Censorship: dropping transactions to ${attackLab.censored_receivers.map(getName).join(", ")}`);
 
   const openView = (next: View) => {
     setView(next);
@@ -416,6 +442,21 @@ export function Dashboard({
 
         <main className="min-w-0 flex-1 p-4 sm:p-6 lg:p-8">
           <div className="mx-auto max-w-[1320px]">
+            {activeFaults.length > 0 && (
+              <div className="mb-5 flex flex-wrap items-center gap-x-4 gap-y-1 rounded-md border border-destructive/30 bg-destructive/5 px-4 py-2.5 text-xs">
+                <span className="flex items-center gap-1.5 font-semibold text-destructive">
+                  <AlertTriangle className="h-3.5 w-3.5" /> Chaos active on this node
+                </span>
+                {activeFaults.map((fault) => (
+                  <span key={fault} className="text-muted-foreground">{fault}</span>
+                ))}
+                {view !== "attack_lab" && (
+                  <button className="ml-auto text-primary underline-offset-2 hover:underline" onClick={() => openView("attack_lab")}>
+                    Open Attack Lab
+                  </button>
+                )}
+              </div>
+            )}
             <div className="mb-7 flex flex-wrap items-end justify-between gap-4">
               <div>
                 <div className="eyebrow">
@@ -1182,7 +1223,7 @@ function TransactionTable({
 type Pt = { x: number; y: number };
 
 type PacketKind = "tx" | "stake" | "block";
-type Packet = { id: number; kind: PacketKind; fromKey: string; toKey?: string | undefined };
+type Packet = { id: number; kind: PacketKind; fromKey: string; toKey?: string | undefined; delayMs: number };
 
 const GENESIS = "Genesis";
 // The faucet is not a peer: it sits in the middle of the ring the peers are laid out on.
@@ -1195,12 +1236,21 @@ const PACKET_STYLES: Record<PacketKind, string> = {
 };
 
 /** One glowing dot travelling between two node positions (fractions of the canvas). */
-function PacketDot({ from, to, kind }: { from: Pt; to: Pt; kind: PacketKind }) {
+function PacketDot({ from, to, kind, delayMs }: { from: Pt; to: Pt; kind: PacketKind; delayMs: number }) {
   const [moving, setMoving] = useState(false);
+  // With injected latency the dot sits at its sender for `delayMs` before it is let go.
   useEffect(() => {
-    const frame = requestAnimationFrame(() => requestAnimationFrame(() => setMoving(true)));
-    return () => cancelAnimationFrame(frame);
-  }, []);
+    let frame = 0;
+    const start = () => {
+      frame = requestAnimationFrame(() => requestAnimationFrame(() => setMoving(true)));
+    };
+    const timer = delayMs > 0 ? window.setTimeout(start, delayMs) : undefined;
+    if (delayMs <= 0) start();
+    return () => {
+      cancelAnimationFrame(frame);
+      window.clearTimeout(timer);
+    };
+  }, [delayMs]);
   const at = moving ? to : from;
   return (
     <div
@@ -1339,7 +1389,7 @@ function NetworkPanel({
             if (toIndex >= 0) {
               const target = positions[toIndex];
               return target && toIndex !== originIndex
-                ? [<PacketDot key={`${packet.id}-to`} from={origin} to={target} kind={packet.kind} />]
+                ? [<PacketDot key={`${packet.id}-to`} from={origin} to={target} kind={packet.kind} delayMs={packet.delayMs} />]
                 : [];
             }
             if (fromGenesis) return [];
@@ -1347,7 +1397,7 @@ function NetworkPanel({
               const target = positions[j];
               return j === originIndex || !target
                 ? []
-                : [<PacketDot key={`${packet.id}-${j}`} from={origin} to={target} kind={packet.kind} />];
+                : [<PacketDot key={`${packet.id}-${j}`} from={origin} to={target} kind={packet.kind} delayMs={packet.delayMs} />];
             });
           })}
         </div>
