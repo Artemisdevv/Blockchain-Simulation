@@ -84,6 +84,11 @@ Open the dashboard at:
 
 **http://localhost:8080/**
 
+Enter a node name and a room ID and press *Start PoS Peer*: the peer manager starts a real peer for you. The
+first node in a room creates the network, and everyone who joins the same room ID discovers it through the
+signalling server. Tick *Join as a malicious node* to add an attacker. For the scripted demo cast (Alice, Bob,
+Mallory and swarm peers in room `demo`) start the stack with `docker compose --profile demo up -d`.
+
 The public tunnel is not required for local access.
 
 To stop and remove the running containers:
@@ -100,13 +105,13 @@ See [Docker Setup](docs/DOCKER.md) for more details.
 |---|---:|---|
 | `frontend` | `8080` | Web dashboard |
 | `signalling` | `7000` | Peer discovery |
-| `peer-alice`, `peer-bob` | `6000` inside network | Honest peers |
-| `peer-mallory` | — | Malicious peer |
-| `peer-swarm` | — | Additional peers |
-| `peer-manager` | — | Peer lifecycle management |
+| `peer-manager` | — (`7001`/`7002` inside the network) | Starts and stops the peers created from the browser |
 | `cloudflared` | — | Public tunnel for the demo |
+| `peer-alice`, `peer-bob` | `6001` / `6011` (API), `6002` / `6012` (events) | Honest peers (demo profile) |
+| `peer-mallory` | — | Malicious peer (demo profile) |
+| `peer-swarm` | — | Additional non-staking peers (demo profile) |
 
-> **Note:** The `peer-*` services are enabled through the `demo` Compose profile, which is activated by the included demo launchers.
+> **Note:** The `peer-*` services are enabled through the `demo` Compose profile, which is activated by the included demo launchers (or `docker compose --profile demo up -d`). Without it the stack starts empty and peers come from the browser.
 
 ---
 
@@ -138,6 +143,30 @@ The simulation currently provides three consensus mechanisms:
 
 Each consensus implementation includes its own peer-to-peer logic and malicious-node scenarios, allowing different attack and failure behaviours to be explored within the simulation.
 
+The web API, the dashboard and the peer manager work with **Proof of Stake** (the mode this project focuses on).
+
+### Proof-of-Stake fixes
+
+The starter code shipped with bugs in its PoS consensus. These are fixed and covered by tests in `tests/`:
+
+| Problem | Fix |
+|---|---|
+| Every node ran its own random lottery, so zero or several nodes could "win" an epoch and fork the chain | Deterministic, stake-weighted `elect_leader(seed, stakes)`: every node computes the same leader from shared data. Blocks from anyone else, or whose stake list omits or alters a known stake, are rejected |
+| A double-signed block pair was never slashed (the chain-sync fork check was inverted; slashing checked a signature against the wrong block) | Same creator behind two different blocks at one height is slashed, both when chains are exchanged and immediately when the second block arrives |
+| Nodes that lost an election kept their stake locked forever | Stake state is cleared whenever an epoch ends |
+| Empty blocks were rejected by receivers, so quiet epochs forked the network | A block may carry zero transactions; one is minted every epoch |
+| Duplicate transactions slipped in (already in the previous block, or already in the mempool) | Duplicate checks on block validation and on receipt |
+| Faucet/genesis mints crashed peer validation and could be forged | Signed with a faucet key, verified by every peer, capped at 500 |
+
+Also under test: staking rules (non-stakers, non-positive or over-balance amounts and a second stake in one epoch
+are rejected) and the genesis balance (exactly 50 coins, no miner reward).
+
+### Malicious node and slashing
+
+A node joined with the **malicious role** (`consensus/pos/malicious_peer.py`) double-signs whenever it is elected:
+it sends two conflicting blocks to different halves of the network. Honest nodes detect the pair, mark the block
+`is_valid: false` / `slash_creator: true`, and take the stake. Every dashboard shows the block as **Slashed**.
+
 ---
 
 ## Project Structure
@@ -156,7 +185,7 @@ Blockchain-Simulation/
 │
 ├── consensus/                        # Consensus protocols and peer implementations
 │   ├── pow/                          # Proof-of-Work protocol
-│   ├── pos/                          # Proof-of-Stake protocol
+│   ├── pos/                          # Proof-of-Stake protocol (p2p.py, malicious_peer.py, ...)
 │   └── poa/                          # Proof-of-Authority protocol
 │
 ├── smart_contract/                   # Smart-contract execution and storage
@@ -214,7 +243,7 @@ pip install -r requirements-dev.txt
 pytest tests/
 ```
 
-The test suite covers consensus behaviour, staking, elections, genesis balances, empty blocks, peer management, rate limiting, spectator reports, and related functionality.
+The test suite covers the PoS fixes above (election, double-sign slashing, duplicate transactions, faucet mints, empty blocks, genesis balance), staking rules, auto-stake, peer management (roles, capacity, idle reaping, authorised stop), rate limiting, and spectator reports.
 
 ### Frontend
 
@@ -226,15 +255,15 @@ npm install
 npm run dev
 ```
 
-The frontend uses TypeScript and Vite.
+The frontend uses TypeScript and Vite (dev server on port 8080). Its API calls need the peer manager and peers reachable, so for day-to-day work it is simpler to run the stack in Docker and rebuild after changes: `docker compose up -d --build frontend`. See [Frontend Guide](docs/FRONTEND_UX.md).
 
 ---
 
 ## Documentation
 
-- [API Reference](docs/API.md)
-- [Docker Setup](docs/DOCKER.md)
-- [Frontend UX Notes](docs/FRONTEND_UX.md)
+- [API Reference](docs/API.md): per-node REST and WebSocket API, peer manager API, roles, how the leader is chosen
+- [Docker Setup](docs/DOCKER.md): services, the `demo` profile, joining from the browser, rebuilding
+- [Frontend Guide](docs/FRONTEND_UX.md): views, features, demo script
 
 ---
 

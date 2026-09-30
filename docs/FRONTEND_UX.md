@@ -1,113 +1,80 @@
-# Frontend UX & Demo Plan
+# Frontend Guide
 
-For Shreyas (build) and Adarsh (UX test + demo script). Goal: not just
-"functional dashboard" — something that visibly *pops* on a judge's screen
-in the 2-3 minutes they'll actually watch.
+The dashboard (`web/`) is Vite + React + TypeScript + Tailwind + shadcn/ui (TanStack Start). It is one node's
+view of a Proof-of-Stake network: you start a node from the browser, and everything on screen comes live from
+that node's [web API](API.md).
 
-**A working scaffold exists in `web/`** (Vite + React + TypeScript + Tailwind
-+ shadcn/ui, fintech-clean direction) — see `web/README.md` for what's built
-vs. not. Base flow below is already implemented; Tier 1/2 below is the
-remaining work.
+## The flow
 
-## Base flow
+1. **Join screen** (`ConnectionScreen.tsx`): enter a *node name* and a *room ID*. The peer manager starts a real
+   peer for you and the dashboard connects to it. Optional: *Join as a malicious node*. *Advanced: connect by URL*
+   points the dashboard at any existing node with its token (used for spectators and the demo peers).
+2. **Dashboard** (`Dashboard.tsx`): live updates arrive over the node's `/events` WebSocket
+   (`block_appended`, `peer_discovered`, `peer_left`, `stake_registered`, `tx_seen`, `node_slashed`,
+   `attack_state`); a 30 second REST refresh backs them up. If the peer disappears (manager restarted, idle
+   timeout) the dashboard returns to the join screen instead of showing zeros.
 
-1. **Connect screen** (one-time, store in localStorage): node API URL
-   (`http://localhost:6000`) + the auth token printed when the peer starts.
-   This is not a login system — it's just pointing the dashboard at your own
-   local node. See `docs/API.md` for the auth header format.
-2. **Dashboard** — subscribe to `/events` (see `docs/API.md`) for live push
-   updates (`block_appended`, `peer_discovered`, `stake_registered`,
-   `node_slashed`); fall back to polling `/chain`, `/peers`, `/mempool`,
-   `/stakers` only if you need data `/events` doesn't cover:
-   - Overview: my balance, epoch countdown, peer count
-   - Chain explorer, live peer list, stakers panel, send-tx form, stake form
+Header actions: **Tour**, **Share spectator link**, **Auto-stake** switch, **+50 Test Coins**, **Send
+transaction**, **Add stake**. They wrap onto several lines on narrow screens.
 
-That's the functional floor. Below is what turns it into something that
-stands out.
+## Views
 
-## Why "wow factor" here specifically
+| Tab | What it shows |
+|---|---|
+| **Overview** | Balance (with pending and auto-faucet share), epoch countdown, peer count, chain height, pending txs, live invariants, latest blocks, stake distribution, mempool |
+| **Explorer** | The chain as block cards, newest first. Each block shows its creator, transactions, stake and a Verified / **Slashed** badge read from the chain (`is_valid`, `slash_creator`). **Time travel**: a slider, *Replay from start* and *Back to live* replay how the chain grew; new blocks keep arriving while you look back. Click a block or transaction for the details |
+| **Network** | Peer mesh topology. Drag nodes to rearrange. Transactions (blue), stakes (amber) and new blocks (green) fly from their sender to every other node as they happen. Known peers list below |
+| **Validators** | Leaderboard with each staker's win probability, the stake form (shows your chance of being picked as you type), and **Why is this node next?**: the stake-weighted draw drawn as slices of a line with the hash "pick" marked, plus who won the last epoch |
+| **Mempool** | Pending transactions and the send form (receiver is a peer name) |
+| **Chaos Lab** | Fault injection on your own node: kill a managed node, partition the network, add outbound latency, censor a recipient. Shows the malicious nodes currently running |
 
-PS3's own bonus list basically hands you the demo script: *network/blockchain
-visualizations, real-time monitoring, malicious-node detection, validator
-dashboards, fault tolerance, network stats.* Lean into exactly those — a
-judge who wrote that list will recognize when a team actually built it.
+## Roles and attacks
 
-## Tier 1 — build these, highest impact per hour
+- **Malicious node** (join-screen option): stakes automatically and double-signs conflicting blocks whenever it
+  is elected. Honest nodes detect the pair, mark the block **Slashed** on every dashboard, and take the stake.
+  The Validators tab shows "Last epoch's winner ... Slashed for double-signing".
+- **Chaos Lab** controls are deliberate faults for demonstrating resilience, not attacks on the network.
 
-**1. Dark, purpose-built visual design, not a default Bootstrap table.**
-Cheapest thing on this list and the biggest multiplier on perceived quality.
-Dark background, monospace for hashes/pubkeys (truncate + copy-to-clipboard,
-nobody wants to read a full PEM key), one accent color reserved for "this is
-me" (my node, my stake, my transaction). A generic admin-table UI reads as
-unfinished next to this even with identical functionality underneath.
+## Spectator mode
 
-**2. Chain explorer as connected block cards, not a table.**
-Each block a card (creator name/truncated key, tx count, timestamp,
-staked_amt). Draw a visible link from each card back to the block whose hash
-matches its `prevHash` — literally show the chain. New block arrives (poll
-detects `/chain` grew) → animate it sliding in. This is the single most
-recognizable "yes, this is a blockchain" visual and it's just CSS + a poll
-diff, not a new backend feature.
+**Share spectator link** creates a read-only link (24 hours) for your room, with a QR code. Anyone who opens it
+sees the dashboard without a node and cannot send transactions or change anything. Spectators can export a
+**PDF run report** of the room (participants, blocks, stakes, attack events). Creating a link needs a token from
+a node in the room, so it is done from the dashboard, not the join screen.
 
-**3. Live validator/stakers leaderboard with probability bars.**
-`GET /stakers` gives you `{pem: amount}`. Render each as a bar sized by
-`amount / sum(all amounts)` — that bar *is* their literal win probability
-for the next block (that's the actual PoS mechanic you fixed in #3). When a
-block lands, flash/highlight whichever staker turns out to be the creator.
-Shows judges you understand the mechanism you were debugging, not just that
-you copy-pasted a UI over it.
+## Guided tour
 
-**4. Live peer topology graph.**
-`GET /peers` → force-directed graph (nodes = peers, you at center or
-highlighted). A library like `react-force-graph` or a small D3 force sim
-gets you this in an afternoon. Watching the mesh reshape as nodes join is a
-strong visual, and it's a direct payoff of the signalling-server work (#4) —
-frame it as "nodes finding each other with just a room code, no manual IPs."
+The **Tour** button (it also opens once for a new browser) walks through wallet, transaction, network, staking,
+the election, blocks and the malicious-node flow, jumping to the right tab at each step.
 
-**5. The malicious-node moment — build the demo around this.**
-The repo already ships `mal_node.py` for each consensus type, and the
-slashing bug we found and fixed (#3 — `verify_and_slash` was checking a
-signature against the wrong block's content, and duplicating evidence in the
-broadcast) directly enables this. Live demo sequence:
-  - Start 2-3 honest nodes + 1 malicious node (`mal_node.py`, double-signs)
-  - Dashboard shows the malicious node's stake in the leaderboard like
-    everyone else — nothing looks wrong yet
-  - It double-signs → other nodes broadcast `slash_announcement` → dashboard
-    flashes that block/node red, banner: **"Node X slashed — double-sign
-    detected"**, its stake zeroes out on screen
-  This is a genuine security mechanism firing live, not a canned animation.
-  It's the strongest "wow" available because it's real, not staged, and
-  judges can ask questions about it and get real answers.
+## Suggested demo (about 3 minutes)
 
-## Tier 2 — stretch, do these only if Tier 1 is solid with time to spare
+1. Two browsers (or a laptop and a phone via the spectator QR) join the same room by typing a room ID: no IPs.
+   The Network tab shows them connect.
+2. Get test coins, stake, send a transaction. Watch the packet fly, the mempool entry, then the block land.
+3. Open **Why is this node next?** and explain the draw.
+4. Join a node as **malicious**. It double-signs when elected; the block turns **Slashed** on every dashboard.
+5. Use the **Chaos Lab** to partition and heal, or kill a node.
+6. Drag the **time-travel** slider back over the whole run.
 
-- **Room-join flourish**: show the room ID as a big shareable code (maybe a
-  QR code) on the connect screen — "anyone scans this to join your network
-  instantly," ties back to the signalling server story.
-- **Transaction flow micro-animation**: small element moves from a "pending"
-  mempool list into the block card that confirms it.
-- **Fault-tolerance live-kill demo**: kill a connected peer mid-demo, show
-  the topology graph self-heal as gossip sampling reconnects (`#4`'s
-  discover_peers/gossip_peer_sampler already does this automatically — no
-  new backend work, just show it happening).
-- **Consensus health tiles**: animated epoch countdown, blocks/minute,
-  total chain weight (sum of all stakes ever) as a running number.
+Keep **Auto-stake** on for one node only; with several auto-stakers a node can occasionally fall a block behind.
 
-## Suggested demo narrative (~90 seconds)
+## Development
 
-1. Two terminals join the same room by typing a room ID — no IPs. Topology
-   graph shows them connect.
-2. Stake, send a transaction, watch the leaderboard bar predict who's about
-   to win, watch the block card slide into the chain.
-3. Bring in a malicious node. It double-signs. Dashboard catches it live,
-   flashes red, explains what just happened in one line of UI text.
-4. One line to judges: "this consensus had bugs when we started — here's the
-   actual exploit it would have missed" (ties back to issue #3's writeup).
+```
+cd web
+npm install
+npm run dev        # http://localhost:8080
+```
 
-That last beat is what separates this from every other team's dashboard:
-you're not just showing a UI, you're showing a security fix working.
+The dev server proxies `/api/peer-setup`, `/api/runtime` and `/ws/runtime` to the peer manager
+(`localhost:7001` / `7002` by default) and `/api/alice`, `/api/bob` to the demo peers. Those ports are not
+published by `docker-compose.yml` by default, so the simplest workflow is to run everything in Docker and rebuild
+the frontend after changes:
 
-## Data already available (no backend work needed for Tier 1)
+```
+docker compose up -d --build frontend
+```
 
-See `docs/API.md` for full shapes. Everything above only needs:
-`GET /chain`, `GET /peers`, `GET /stakers`, `GET /mempool`.
+Source layout: `src/features/blockchain/` (Dashboard, ConnectionScreen, Explorer pieces, ElectionExplainer,
+SpectatorShare, Tutorial), `src/lib/api-client.ts` (typed API + WebSocket client), `src/routes/` (pages).

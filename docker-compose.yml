@@ -161,9 +161,10 @@ services:
   peer-mallory:
     # Opt-in demo node: docker compose --profile demo up
     profiles: ["demo"]
-    # Malicious node (mal_node.py) - double-signs to demo the slashing
-    # detection fixed in issue #3. No web API on malicious peers by design
-    # (see enable_api in start_peer.py), so no ports published here.
+    # Malicious node (consensus/pos/malicious_peer.py) - double-signs when it is
+    # elected, to demo slashing. It has the same web API as any PoS peer, but no
+    # ports are published for it here. AUTO_STAKE is on so it enters the
+    # election on its own; without staking it can never attack.
     build:
       context: .
       dockerfile: Dockerfile.peer
@@ -186,6 +187,7 @@ services:
       SIGNALLING_PORT: "7000"
       ROOM_ID: demo
       MALICIOUS: "y"
+      AUTO_STAKE: "true"
 
   peer-swarm:
     # Opt-in demo node: docker compose --profile demo up

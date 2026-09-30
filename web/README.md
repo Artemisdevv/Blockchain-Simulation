@@ -1,11 +1,13 @@
-# Frontend — Consensus Console
+# Frontend - Consensus Console
 
-Vite + React + TypeScript + Tailwind + shadcn/ui.
-Connected directly to live Docker container REST & Event WebSocket APIs.
+Vite + React + TypeScript + Tailwind + shadcn/ui (TanStack Start). It is one node's live view of a
+Proof-of-Stake network; the browser starts a node through the peer manager and talks to it over REST and a
+WebSocket.
 
-## Run the whole thing (backend + frontend)
+Features, views, demo script and dev notes are in [`../docs/FRONTEND_UX.md`](../docs/FRONTEND_UX.md); the API it
+consumes is in [`../docs/API.md`](../docs/API.md).
 
-### 1. Backend (Docker)
+## Run everything
 
 From the repo root (`Blockchain-Simulation/`, not `web/`):
 
@@ -13,16 +15,20 @@ From the repo root (`Blockchain-Simulation/`, not `web/`):
 docker compose up -d --build
 ```
 
-This starts the signalling server plus `alice`, `bob` (honest stakers) and `mallory` (malicious node).
+Open **http://localhost:8080**, enter a node name and a room ID, and press *Start PoS Peer*.
+For the scripted demo cast (alice, bob, mallory, swarm) add `--profile demo`; see [`../docs/DOCKER.md`](../docs/DOCKER.md).
 
-### 2. Frontend
+## Frontend only
 
 ```bash
 cd web
 npm install
-npm run dev
+npm run dev     # http://localhost:8080
 ```
 
-Opens on `http://localhost:5173`. On the connect screen:
-- Click **"Connect to Peer Alice (:6001)"** or **"Connect to Peer Bob (:6011)"** for 1-click zero-friction login.
-- Or click **"Spectator QR Code"** to share or open the direct spectator link (`http://localhost:5173/?node=alice`).
+The dev server proxies the API to `localhost` ports (peer manager 7001/7002, alice 6001/6002, bob 6011/6012)
+that Compose does not publish by default, so for day-to-day work rebuild the container instead:
+
+```bash
+docker compose up -d --build frontend
+```
