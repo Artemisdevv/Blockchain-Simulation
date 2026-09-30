@@ -184,6 +184,7 @@ def start_peer():
 async def run_peer(peer, action, bootstrap_host, bootstrap_port,
                     signalling_host, signalling_port, room_id,
                     enable_api, api_port, interactive=True):
+    peer.room_id = room_id  # shown by the dashboard (/metrics); None when not joining by room
     if enable_api:
         from webapi.server import run_api_server
         from webapi.events import run_events_server
