@@ -11,7 +11,10 @@ that node's [web API](API.md).
    points the dashboard at any existing node with its token (used for spectators and the demo peers).
 2. **Dashboard** (`Dashboard.tsx`): live updates arrive over the node's `/events` WebSocket
    (`block_appended`, `peer_discovered`, `peer_left`, `stake_registered`, `tx_seen`, `node_slashed`,
-   `attack_state`); a 30 second REST refresh backs them up. If the peer disappears (manager restarted, idle
+   `attack_state`, `resync_started`, `chain_replaced`); a 30 second REST refresh backs them up.
+   Toasts name the node involved: who won a block, which validator was slashed. When a node finds it is on a
+   different branch (after a double-sign) it shows "Out of sync ... requesting chains" and, once it has switched,
+   "Fork resolved: switched to the network chain (6 → 7 blocks)". If the peer disappears (manager restarted, idle
    timeout) the dashboard returns to the join screen instead of showing zeros.
 
 Header actions: **Tour**, **Share spectator link**, **Auto-stake** switch, **+50 Test Coins**, **Send
@@ -22,17 +25,18 @@ transaction**, **Add stake**. They wrap onto several lines on narrow screens.
 | Tab | What it shows |
 |---|---|
 | **Overview** | Balance (with pending and auto-faucet share), epoch countdown, peer count, chain height, pending txs, live invariants, latest blocks, stake distribution, mempool |
-| **Explorer** | The chain as block cards, newest first. Each block shows its creator, transactions, stake and a Verified / **Slashed** badge read from the chain (`is_valid`, `slash_creator`). **Time travel**: a slider, *Replay from start* and *Back to live* replay how the chain grew; new blocks keep arriving while you look back. Click a block or transaction for the details |
-| **Network** | Peer mesh topology. Drag nodes to rearrange. Transactions (blue), stakes (amber) and new blocks (green) fly from their sender to every other node as they happen. Known peers list below |
+| **Explorer** | The chain as block cards, newest first. Each block shows its creator, transactions, stake and a Verified / **Slashed** badge read from the chain (`is_valid`, `slash_creator`). **Time travel**: a slider, *Replay from start* and *Back to live* replay how the chain grew; new blocks keep arriving while you look back. Click a block or transaction for the details. The confirmed-transactions table below is paged (8 per page, newest first) |
+| **Network** | Peer mesh topology. Drag nodes to rearrange. A **Genesis** (faucet) node sits in the middle: faucet coins fly from it to the requesting node. A transfer (blue) flies from sender to receiver; stakes (amber) and new blocks (green) fly from the staker or winner to every other node. Known peers list below |
 | **Validators** | Leaderboard with each staker's win probability, the stake form (shows your chance of being picked as you type), and **Why is this node next?**: the stake-weighted draw drawn as slices of a line with the hash "pick" marked, plus who won the last epoch |
-| **Mempool** | Pending transactions and the send form (receiver is a peer name) |
+| **Mempool** | Pending transactions (paged, 8 per page) and the send form (receiver is a peer name) |
 | **Chaos Lab** | Fault injection on your own node: kill a managed node, partition the network, add outbound latency, censor a recipient. Shows the malicious nodes currently running |
 
 ## Roles and attacks
 
 - **Malicious node** (join-screen option): stakes automatically and double-signs conflicting blocks whenever it
   is elected. Honest nodes detect the pair, mark the block **Slashed** on every dashboard, and take the stake.
-  The Validators tab shows "Last epoch's winner ... Slashed for double-signing".
+  The Validators tab shows "Last epoch's winner ... Slashed for double-signing". The two blocks put honest nodes
+  on different branches; each node that notices asks its peers for chains at once and switches to the heavier one.
 - **Chaos Lab** controls are deliberate faults for demonstrating resilience, not attacks on the network.
 
 ## Spectator mode

@@ -155,6 +155,8 @@ The starter code shipped with bugs in its PoS consensus. These are fixed and cov
 |---|---|
 | Every node ran its own random lottery, so zero or several nodes could "win" an epoch and fork the chain | Deterministic, stake-weighted `elect_leader(seed, stakes)`: every node computes the same leader from shared data. Blocks from anyone else, or whose stake list omits or alters a known stake, are rejected |
 | A double-signed block pair was never slashed (the chain-sync fork check was inverted; slashing checked a signature against the wrong block) | Same creator behind two different blocks at one height is slashed, both when chains are exchanged and immediately when the second block arrives |
+| With several auto-stakers the chain forked: a stake received from a peer was stored without its signature, so the leader's block listed only its own stake and nodes disagreed about the staker set | Received stakes keep their signature, so every block carries the full signed stake list |
+| After a double-sign, a node that had followed the other block stayed on its own branch and rejected every later block ("Hash Problem"), and the network never adopted its longer chain | After slashing, a node also follows the heavier chain, and asks its peers for chains immediately when it sees a block that does not build on its tip (instead of waiting for the 60 s periodic exchange) |
 | Nodes that lost an election kept their stake locked forever | Stake state is cleared whenever an epoch ends |
 | Empty blocks were rejected by receivers, so quiet epochs forked the network | A block may carry zero transactions; one is minted every epoch |
 | Duplicate transactions slipped in (already in the previous block, or already in the mempool) | Duplicate checks on block validation and on receipt |
@@ -163,10 +165,16 @@ The starter code shipped with bugs in its PoS consensus. These are fixed and cov
 Also under test: staking rules (non-stakers, non-positive or over-balance amounts and a second stake in one epoch
 are rejected) and the genesis balance (exactly 50 coins, no miner reward).
 
+To experiment with short epochs, set the `EPOCH_TIME` environment variable (seconds, default `60`) on every peer;
+the staking window (5/6 of the epoch) and the minimum block spacing follow it.
+
 ### Malicious node and slashing
 
 A node joined with the **malicious role** (`consensus/pos/malicious_peer.py`) double-signs whenever it is elected:
 it sends two conflicting blocks to different halves of the network. Honest nodes detect the pair, mark the malicious block as invalid `is_valid: false` and flag its creator for slashing `slash_creator: true`. The malicious validator's stake is then slashed, and the affected block is displayed as **Slashed** in the dashboard.
+Because the two blocks split the honest nodes onto different branches, a node that notices it is on the wrong one
+requests chains from its peers straight away and switches to the heavier chain; the dashboard shows "Out of sync"
+and then "Fork resolved" toasts.
 
 ---
 
