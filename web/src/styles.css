@@ -332,3 +332,10 @@
     animation-duration: 0.01ms !important;
   }
 }
+
+/* SwipeToast (React Bits) sits bottom-right by default, where the guided tour card lives. */
+.swipe-toast.swipe-toast-center[data-inline='false'] {
+  right: auto;
+  left: 50%;
+  transform: translateX(-50%);
+}
