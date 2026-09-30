@@ -221,9 +221,14 @@ The server only pushes JSON, nothing needs to be sent:
 { "type": "tx_seen", "sender": "pem-or-Genesis", "receiver": "pem", "amount": 5 }
 { "type": "node_slashed", "creator": "pem", "block_pos": 3 }
 { "type": "attack_state", "attack": "partition|latency|censorship", "...": "..." }
+{ "type": "resync_started" }
+{ "type": "chain_replaced", "old_length": 6, "new_length": 7 }
 ```
 `tx_seen` fires when a transaction enters this node's mempool (drives the packet animation). `node_slashed`
 fires when a block is marked slashed (see `slash_announcement` and `verify_and_slash` in `consensus/pos/p2p.py`).
+`resync_started` fires when the node sees a block that does not build on its tip (it is on a different branch, for
+example after a double-sign) and asks its peers for their chains straight away, at most once every 5 seconds.
+`chain_replaced` fires when the node actually switches to a heavier chain from a peer.
 
 ---
 
