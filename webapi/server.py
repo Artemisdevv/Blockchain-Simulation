@@ -51,6 +51,24 @@ AUTH_FAILURE_WINDOW_SECONDS = 60
 AUTH_BLOCK_SECONDS = 300
 
 
+def _avg_block_time_seconds(blocks, window=10):
+    """
+    Average seconds between the last `window` block intervals, or None with too little data.
+    Block timestamps are in milliseconds (the API and validation treat `ts` as ms), so the span
+    is divided by 1000; treating it as seconds showed "60037.9s" for a 60 second epoch. The
+    genesis block is left out because the gap before the first stake is idle time, not a block time.
+    """
+    recent = blocks[1:][-(window + 1):]
+    if len(recent) < 2:
+        return None
+    span = recent[-1].ts - recent[0].ts
+    if span <= 0:
+        return None
+    if recent[-1].ts > 1e11:  # epoch milliseconds; seconds-based timestamps are ~1e9
+        span /= 1000
+    return round(span / (len(recent) - 1), 1)
+
+
 def _json_body():
     """The request's JSON object, or {} for a missing / invalid / non-object body (list, number...)."""
     data = request.get_json(force=True, silent=True)
@@ -244,7 +262,7 @@ def create_app(peer, loop, token, limiter: RateLimiter, auth_tracker: FailedAuth
                 "total_staked": 0,
                 "mempool_count": len(peer.mem_pool),
                 "peer_count": len(peer.known_peers),
-                "avg_block_time_sec": 30,
+                "avg_block_time_sec": float(EPOCH_TIME),
                 "room_id": getattr(peer, "room_id", "demo")
             })
 
@@ -253,11 +271,8 @@ def create_app(peer, loop, token, limiter: RateLimiter, auth_tracker: FailedAuth
         total_txs = sum(len(b.transactions) for b in blocks)
         total_staked = sum(peer.current_stakers.values()) if peer.current_stakers else 0
 
-        avg_block_time = 30.0
-        if blocks_count > 1:
-            time_diff = blocks[-1].ts - blocks[0].ts
-            if time_diff > 0:
-                avg_block_time = round(time_diff / (blocks_count - 1), 1)
+        measured = _avg_block_time_seconds(blocks)
+        avg_block_time = measured if measured is not None else float(EPOCH_TIME)
 
         return jsonify({
             "blocks_count": blocks_count,
