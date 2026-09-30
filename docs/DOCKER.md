@@ -26,7 +26,9 @@ first person to join a room creates it, and later joiners connect to them. Start
 docker compose --profile demo up -d --build
 ```
 
-`launchers/demo.ps1` and `launchers/demo.sh` do this and also print the public tunnel URL.
+`launchers/demo.ps1` and `launchers/demo.sh` start the stack **without** the demo peers (an empty network) and print
+the public tunnel URL. Add `-DemoPeers` (PowerShell) or `--demo-peers` (shell) to include the scripted cast. Starting
+a launcher without the flag first removes any demo peers left over from an earlier run.
 
 ## Joining from the browser
 
