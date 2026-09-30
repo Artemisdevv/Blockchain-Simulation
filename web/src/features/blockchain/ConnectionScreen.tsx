@@ -202,6 +202,7 @@ export function ConnectionScreen({ onConnect }: { onConnect: (connection: Connec
                   onChange={(e) => setName(e.target.value)}
                   placeholder="your-name"
                   autoFocus
+                  autoComplete="off"
                 />
               </div>
 
@@ -215,6 +216,7 @@ export function ConnectionScreen({ onConnect }: { onConnect: (connection: Connec
                     setRoomId(e.target.value);
                   }}
                   placeholder="my-room"
+                  autoComplete="off"
                 />
               </div>
 
