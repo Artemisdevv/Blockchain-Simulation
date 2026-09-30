@@ -140,22 +140,64 @@ Each consensus implementation includes its own peer-to-peer logic and malicious-
 
 ---
 
-## Repository Layout
+## Project Structure
 
 ```text
-consensus/        PoW, PoA and PoS implementations
-signalling/       Signalling server, client and healthcheck
-webapi/            Flask API, events and rate limiting
-smart_contract/   Contract storage, gas metering and sandbox
-storage/          Persistent storage manager
-ipfs/              IPFS integration
-web/              TypeScript / Vite frontend
-tests/             Automated test suite
-docs/              API, Docker and frontend documentation
-launchers/         One-command demo launchers
+Blockchain-Simulation/
+├── README.md                         # Project overview and setup instructions
+├── requirements.txt                  # Python runtime dependencies
+├── requirements-dev.txt              # Development and test dependencies
+├── docker-compose.yml                # Services and containers for running the project
+├── start_peer.py                     # Starts a blockchain peer
+├── peer_manager.py                   # Manages and coordinates peer processes
+├── shared_blockchain_structures.py   # Blockchain data structures shared across modules
+├── Dockerfile.peer                   # Docker image definition for a peer
+├── Dockerfile.signalling             # Docker image definition for the signalling server
+│
+├── consensus/                        # Consensus protocols and peer implementations
+│   ├── pow/                          # Proof-of-Work protocol
+│   ├── pos/                          # Proof-of-Stake protocol
+│   └── poa/                          # Proof-of-Authority protocol
+│
+├── smart_contract/                   # Smart-contract execution and storage
+│   ├── smart_contract.py             # Contract logic and interface
+│   ├── secure_executor.py            # Executes contracts with security controls
+│   ├── sandbox_runner.py             # Runs contract code in a sandbox
+│   ├── gas_meter.py                  # Tracks contract execution cost
+│   └── contracts_db.py               # Stores and retrieves contracts
+│
+├── storage/                          # Blockchain persistence utilities
+│   └── storage_manager.py            # Reads and writes blockchain data
+│
+├── ipfs/                             # IPFS integration
+│   └── ipfs.py                       # Stores and retrieves content through IPFS
+│
+├── signalling/                       # Peer discovery and connection signalling
+│   ├── server.py                     # Signalling server
+│   ├── client.py                     # Peer-side signalling client
+│   └── healthcheck.py                # Signalling service health check
+│
+├── webapi/                           # HTTP API and real-time event endpoints
+│   ├── server.py                     # Main web API server and routes
+│   ├── events.py                     # Publishes blockchain events to clients
+│   ├── rate_limit.py                 # API rate-limiting logic
+│   └── healthcheck.py                # API service health check
+│
+├── web/                              # Web dashboard and frontend
+│   ├── package.json                  # Frontend dependencies and scripts
+│   ├── vite.config.ts                # Frontend build and development configuration
+│   └── src/
+│       ├── features/blockchain/      # Blockchain dashboard, connection flow, and tutorials
+│       ├── components/               # Shared visual components
+│       ├── routes/                   # Application pages and route definitions
+│       ├── lib/                      # API client and shared frontend utilities
+│       ├── server.ts                 # Frontend server entry point
+│       └── styles.css                # Global frontend styles
+│
+├── tests/                            # Automated tests for blockchain and API behavior
+├── docs/                             # API, Docker, and frontend documentation
+└── launchers/                        # Demo launch scripts for supported platforms
 
-peer_manager.py   Peer lifecycle management
-start_peer.py     Peer entry point
 ```
 
 ---
@@ -195,3 +237,5 @@ The frontend uses TypeScript and Vite.
 - [Frontend UX Notes](docs/FRONTEND_UX.md)
 
 ---
+
+
