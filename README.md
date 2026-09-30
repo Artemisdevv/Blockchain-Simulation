@@ -53,20 +53,20 @@ The easiest way to start the complete simulation is with the included demo launc
 #### Windows
 
 ```powershell
-.\launchers\demo.ps1
+.\launchers\launcher.ps1
 ```
 
 The launcher builds and starts the Docker stack, waits for the services to become ready, starts a Cloudflare Quick Tunnel, and displays the public demo URL in a separate terminal.
 
-The network starts **empty**: open the URL, join with any node name and a room ID of your choosing, and let others join the same room. To also start the scripted cast (Alice, Bob, Mallory and swarm peers in room `demo`), run `.\launchers\demo.ps1 -DemoPeers` (or `./launchers/demo.sh --demo-peers`).
+The network starts **empty**: open the URL, join with any node name and a room ID of your choosing, and let others join the same room. To also start the scripted cast (Alice, Bob, Mallory and swarm peers in room `demo`), run `.\launchers\launcher.ps1 -DemoPeers` (or `./launchers/launcher.sh --demo-peers`).
 
 The generated URL can be opened with **Ctrl+Click**.
 
 #### Linux / macOS
 
 ```bash
-chmod +x launchers/demo.sh
-./launchers/demo.sh
+chmod +x launchers/launcher.sh
+./launchers/launcher.sh
 ```
 
 The shell launcher starts the same stack (empty network; `--demo-peers` adds the scripted cast) and prints the temporary public Cloudflare URL in the terminal.
