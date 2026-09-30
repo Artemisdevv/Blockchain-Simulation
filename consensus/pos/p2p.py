@@ -381,7 +381,7 @@ class Peer:
 
         if not t or not id:
             return
-        sender_key = getattr(self, "connection_peer_keys", {}).get(websocket)
+        sender_key = self.peer_key_of(websocket)
         if sender_key in getattr(self, "attack_blocked_peer_keys", set()) and t not in ("peer_info", "add_peer", "new_peer"):
             return
         if id in self.seen_message_ids:
@@ -990,10 +990,11 @@ class Peer:
                     block2 = block_list[pos]
 
                     if block1.creator != block2.creator:  # Ordinary fork: different leaders
-                        l1 = len(Chain.instance.chain)
-                        l2 = len(block_list)
-                        if l2 > l1 and self.replace_chain_if_heavier(block_list):
-                            print("\nCurrent chain replaced by longer chain after a fork\n")
+                        # Heavier wins, not longer: after a partition both sides have the same
+                        # height, and requiring a longer chain left the split in place until
+                        # one side happened to get a block ahead.
+                        if self.replace_chain_if_heavier(block_list):
+                            print("\nCurrent chain replaced by heavier chain after a fork\n")
                             if self.activate_disk_save == "y":
                                 self.save_chain_to_disk()
                     else:  # Same creator, two different blocks at one height: double-sign
@@ -1105,7 +1106,7 @@ class Peer:
 
         targets=self.server_connections | self.client_connections
         for ws in targets:
-            if getattr(self, "connection_peer_keys", {}).get(ws) in getattr(self, "attack_blocked_peer_keys", set()):
+            if self.peer_key_of(ws) in getattr(self, "attack_blocked_peer_keys", set()):
                 continue
             try:
                 await ws.send(json.dumps(pkt))
@@ -1142,9 +1143,26 @@ class Peer:
                 dead.add(ws)
         self.event_subscribers -= dead
 
+    def peer_key_of(self, ws):
+        """
+            Public key of the peer on the other end of `ws`. Inbound sockets are identified
+            by the peer_info they send us; sockets we dialed ourselves never get one, but
+            we know who we dialed (known_peers), so identify them by endpoint. Without
+            this the Attack Lab partition missed every outbound link.
+        """
+        key=getattr(self, "connection_peer_keys", {}).get(ws)
+        if key or ws not in getattr(self, "client_connections", ()):
+            return key
+        try:
+            info=self.known_peers.get(normalize_endpoint(tuple(ws.remote_address[:2])))
+        except (OSError, TypeError, IndexError, AttributeError):
+            return None
+        return info[1] if info else None
+
     async def set_attack_partition(self, peer_keys):
         self.attack_blocked_peer_keys.update(peer_keys)
-        sockets = [ws for ws, key in self.connection_peer_keys.items() if key in self.attack_blocked_peer_keys]
+        sockets = [ws for ws in (self.server_connections | self.client_connections)
+                   if self.peer_key_of(ws) in self.attack_blocked_peer_keys]
         for ws in sockets:
             await ws.close(code=4003, reason="peer isolated by Attack Lab")
         await self.emit_event({"type": "attack_state", "attack": "partition", "blocked_peers": len(self.attack_blocked_peer_keys)})
@@ -1457,6 +1475,9 @@ class Peer:
         endpoint=(host, port)
         if endpoint in self.outbound_peers or endpoint==(self.host, self.port):
             return
+        known=self.known_peers.get(endpoint)
+        if known and known[1] in self.attack_blocked_peer_keys:
+            return # isolated by the Attack Lab: don't re-dial until healed
 
         uri=f"ws://{host}:{port}"
         
