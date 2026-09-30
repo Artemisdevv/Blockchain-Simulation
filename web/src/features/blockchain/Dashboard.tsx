@@ -139,6 +139,24 @@ export function Dashboard({
   // Spectator mode detection
   const isSpectator = connection.readOnly === true;
   const [attackEvent, setAttackEvent] = useState<any>(null);
+  // A transaction entering the mempool only needs the mempool and balance, not a full refresh.
+  // Coalesced so a burst (several faucet requests) costs one fetch.
+  const pendingRefreshTimer = useRef<number | undefined>(undefined);
+  const refreshPending = useCallback(() => {
+    window.clearTimeout(pendingRefreshTimer.current);
+    pendingRefreshTimer.current = window.setTimeout(async () => {
+      try {
+        const [m, b] = await Promise.all([
+          fetchMempool(connection),
+          isSpectator ? Promise.resolve(null) : fetchBalance(connection),
+        ]);
+        setMempool(m);
+        if (b) setBalance(b);
+      } catch {
+        // the next full refresh reports real failures (including a vanished peer)
+      }
+    }, 250);
+  }, [connection, isSpectator]);
   const refreshAll = useCallback(async () => {
     try {
       const [c, p, m, s, b, inv, met] = await Promise.all([
@@ -207,6 +225,7 @@ export function Dashboard({
       onTxSeen: (tx) => {
         // Faucet mints come from "Genesis" (drawn as a node in the middle of the graph).
         addPacket("tx", tx.sender, tx.receiver);
+        refreshPending();
       },
       onPeerDiscovered: (peer) => {
         setToast(`Peer discovered: ${peer.name || peer.host}`);
@@ -219,6 +238,7 @@ export function Dashboard({
       onStakeRegistered: (data) => {
         setToast(`Stake registered: ${data.amount} coins`);
         addPacket("stake", data.staker);
+        refreshPending(); // staking (auto-stake included) lowers the spendable balance right away
         fetchStakers(connection).then((s) => {
           setStakers(s);
           setCountdown(s.epoch_ends_in_seconds);
@@ -238,7 +258,7 @@ export function Dashboard({
     });
 
     return () => unsubscribe();
-  }, [connection, refreshAll, addPacket]);
+  }, [connection, refreshAll, refreshPending, addPacket]);
 
   // Countdown timer decrement
   useEffect(() => {
@@ -434,11 +454,13 @@ export function Dashboard({
                     )}
                     <Button
                       variant="outline"
+                      disabled={Boolean(balance.pending_income)}
+                      title={balance.pending_income ? "A faucet request is waiting for the next block" : undefined}
                       onClick={async () => {
                         try {
                           const res = await requestFaucet(connection, 50);
                           if (res.ok) {
-                            setToast("Dev Faucet: 50 test coins added to your wallet!");
+                            setToast(`Faucet request sent: the 50 coins arrive with the next block (in about ${countdown}s).`);
                             refreshAll();
                           }
                         } catch (err: any) {
@@ -447,7 +469,7 @@ export function Dashboard({
                       }}
                       className="text-success border-success/30 hover:bg-success/10"
                     >
-                      <Coins className="h-4 w-4" /> +50 Test Coins
+                      <Coins className="h-4 w-4" /> {balance.pending_income ? "Coins pending..." : "+50 Test Coins"}
                     </Button>
                     {view !== "mempool" && (
                       <Button variant="outline" onClick={() => openView("mempool")}>
