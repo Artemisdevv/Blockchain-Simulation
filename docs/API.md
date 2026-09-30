@@ -37,6 +37,18 @@ allowed to call the API directly; the default is localhost only.
   even with the right token).
 - `POST /faucet` has its own limit: 10 requests per hour per IP.
 
+All requests through the peer manager reach a node from the same address (the proxy), so the failed-auth
+lockout applies to every dashboard talking to that node, not to one user.
+
+**Input validation.**
+- Coin amounts (`/transactions`, `/faucet`, `/stakes`, and transactions, stakes and blocks received from
+  other peers) must be real, finite numbers above zero. `NaN`, `Infinity`, booleans, strings and negative
+  values are rejected with `400`. This matters because Python's JSON parser accepts `NaN` / `Infinity`, and NaN
+  passes ordinary `<= 0` / `> limit` comparisons.
+- A request body that is not a JSON object (a list, a number, invalid JSON) is treated as empty, so it gets the
+  normal "field is required" `400`, never a `500`.
+- Request bodies are limited to 16 KB (`413`).
+
 ### Chain and network state
 
 #### `GET /chain`
@@ -230,7 +242,8 @@ reaches it through `/api/peer-setup/...`, `/api/runtime/...` and `/ws/runtime/..
 | `/spectator/<token>/report.json`, `report.pdf` | `Bearer <token>` | Run report (JSON or PDF) for the room |
 
 Managed peers are stopped after `PEER_MANAGER_IDLE_TIMEOUT` (default 120s) without any dashboard traffic, and
-their ports are reused.
+their ports are reused. Request bodies are limited to 64 KB (`413`); a non-object JSON body counts as empty.
+The manager has no rate limiting of its own beyond the peer cap.
 
 ### Roles
 
