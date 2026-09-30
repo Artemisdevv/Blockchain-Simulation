@@ -283,7 +283,7 @@ The frontend uses TypeScript and Vite (dev server on port 8080). Its API calls n
 | Muhammed Adnan Sameer | [@adn26](https://github.com/adn26) | Backend, PoS consensus fixes, signalling server, API |
 | Aswin A Arun | [@Artemisdevv](https://github.com/Artemisdevv) | Deployment, Docker, peer manager |
 | Shreyas Syam | [@shreyas-syam](https://github.com/shreyas-syam) | Frontend, web dashboard |
-| Adarsh | [@adarshkrishna14](https://github.com/adarshkrishna14) | Demo, UX testing, presentation |
+| Adarsh Krishna| [@adarshkrishna14](https://github.com/adarshkrishna14) | Demo, UX testing, presentation |
 
 ---
 
