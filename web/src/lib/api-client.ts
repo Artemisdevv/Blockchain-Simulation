@@ -318,6 +318,8 @@ export interface WsEventHandlers {
   onTxSeen?: (data: { sender: string; receiver: string; amount: number }) => void;
   onNodeSlashed?: (event: NodeSlashedEvent) => void;
   onAttackState?: (event: Record<string, unknown>) => void;
+  onResyncStarted?: () => void;
+  onChainReplaced?: (event: { old_length: number; new_length: number }) => void;
   onOpen?: () => void;
   onError?: (err: Event) => void;
   onClose?: () => void;
@@ -391,6 +393,15 @@ export function connectEventsWs(
             break;
           case "attack_state":
             handlers.onAttackState?.(data);
+            break;
+          case "resync_started":
+            handlers.onResyncStarted?.();
+            break;
+          case "chain_replaced":
+            handlers.onChainReplaced?.({
+              old_length: Number(data.old_length),
+              new_length: Number(data.new_length),
+            });
             break;
           }
         } catch (err) {

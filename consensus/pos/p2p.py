@@ -18,6 +18,7 @@ MAX_CONNECTIONS = 8
 MAX_OUTPUT=2**256
 EPOCH_TIME=int(os.environ.get("EPOCH_TIME", "60")) # env override lets tests/harnesses run short epochs
 AUTO_STAKE_SETTLE_SECONDS=5
+RESYNC_MIN_INTERVAL_SECONDS=5
 GAS_PRICE = 0.001 # coin per gas unit
 BASE_DEPLOY_COST = 5
 CONSENSUS ="pos"
@@ -720,7 +721,10 @@ class Peer:
                         return
                     print("\nConflicting block from the same creator - checking for double-sign\n")
                     await self.verify_and_slash(tip, newBlock, len(Chain.instance.chain) - 1, [])
+                    await self.request_resync()  # we may be the node on the wrong branch
                     return
+                if tip.hash != newBlock.prevHash:
+                    await self.request_resync()
                 print("\nInvalid Block\n")
                 return
 
@@ -988,8 +992,8 @@ class Peer:
                     if block1.creator != block2.creator:  # Ordinary fork: different leaders
                         l1 = len(Chain.instance.chain)
                         l2 = len(block_list)
-                        if l2 > l1:
-                            Chain.instance.rewrite(block_list)
+                        if l2 > l1 and self.replace_chain_if_heavier(block_list):
+                            print("\nCurrent chain replaced by longer chain after a fork\n")
                             if self.activate_disk_save == "y":
                                 self.save_chain_to_disk()
                     else:  # Same creator, two different blocks at one height: double-sign
@@ -1001,18 +1005,17 @@ class Peer:
                         if Chain.instance.chain[pos].slash_creator:
                             block2.is_valid = False
                             block2.slash_creator = True
-                        if weight_of_chain(Chain.instance.chain) < weight_of_chain(block_list):
-                            Chain.instance.rewrite(block_list)
+                        if self.replace_chain_if_heavier(block_list):
                             print("\nCurrent chain replaced by heavier chain after double-sign\n")
                             if self.activate_disk_save == "y":
                                 self.save_chain_to_disk()
 
                 elif weight_of_chain(Chain.instance.chain) < weight_of_chain(block_list):
-                    Chain.instance.rewrite(block_list)
-                    print("\nCurrent chain replaced by heavier chain\n")
-                    if self.activate_disk_save == "y":
-                        self.save_chain_to_disk()
-                
+                    if self.replace_chain_if_heavier(block_list):
+                        print("\nCurrent chain replaced by heavier chain\n")
+                        if self.activate_disk_save == "y":
+                            self.save_chain_to_disk()
+
                 else:
                     print("\nCurrent Chain heavier than received chain\n")
 
@@ -1823,19 +1826,54 @@ class Peer:
                 if newBlock.cid_exists_in_block(hash):
                     self.file_hashes.pop(hash, None)
                                                        
+    async def send_chain_requests(self):
+        pkt={
+            "type":"chain_request",
+            "id":str(uuid.uuid4())
+        }
+        self.seen_message_ids.add(pkt["id"])
+        await self.broadcast_message(pkt)
+        print("\nSent out chain requests...")
+
+    async def request_resync(self):
+        """
+            A block that does not build on our tip means we are on a different branch
+            from its sender. Ask for chains now instead of waiting for the periodic
+            find_longest_chain round; rate-limited so a burst of such blocks (or a peer
+            relaying them) does not flood the network or the dashboard.
+        """
+        now=datetime.now()
+        last=getattr(self, "last_resync_request", None)
+        if last is not None and (now-last).total_seconds()<RESYNC_MIN_INTERVAL_SECONDS:
+            return
+        self.last_resync_request=now
+        print("\nOut of sync with the network - requesting chains now\n")
+        asyncio.create_task(self.emit_event({"type": "resync_started"}))
+        await self.send_chain_requests()
+
+    def replace_chain_if_heavier(self, block_list:List[Block]):
+        """
+            Chain.rewrite() silently keeps our chain unless the other one is heavier, so
+            check whether it actually switched before telling browsers.
+        """
+        old_chain=Chain.instance.chain
+        Chain.instance.rewrite(block_list)
+        if Chain.instance.chain is old_chain:
+            return False
+        asyncio.create_task(self.emit_event({
+            "type": "chain_replaced",
+            "old_length": len(old_chain),
+            "new_length": len(Chain.instance.chain),
+        }))
+        return True
+
     async def find_longest_chain(self):
         """
             We routinely check every 30 seconds, every other chain and we replace
             ours with theirs if theirs is >= ours
         """
         while True:
-            pkt={
-                "type":"chain_request",
-                "id":str(uuid.uuid4())
-            }
-            self.seen_message_ids.add(pkt["id"])
-            await self.broadcast_message(pkt)
-            print("\nSent out chain requests...")
+            await self.send_chain_requests()
             await asyncio.sleep(60)
 
     def calculate_contract_id(self, sender, timestamp):

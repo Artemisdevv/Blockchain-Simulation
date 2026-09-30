@@ -230,6 +230,11 @@ export function Dashboard({
         refreshAll();
       },
       onAttackState: (event) => setAttackEvent(event),
+      onResyncStarted: () => setToast("Out of sync with the network: requesting chains from peers to catch up..."),
+      onChainReplaced: (event) => {
+        setToast(`Fork resolved: switched to the network chain (${event.old_length} → ${event.new_length} blocks).`);
+        refreshAll();
+      },
     });
 
     return () => unsubscribe();
