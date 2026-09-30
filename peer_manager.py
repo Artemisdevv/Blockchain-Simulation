@@ -174,6 +174,7 @@ class PeerManager:
         self.runs = {}
         self.event_loop = None
         self.collector_futures = []
+        self.collectors = {}  # peer_id -> future of that managed peer's event collector
         self.signing_key = os.environ.get("SPECTATOR_SIGNING_KEY") or load_or_create_secret(".spectator_signing_key")
         self.issuer_token = os.environ.get("SPECTATOR_ISSUER_TOKEN") or load_or_create_secret(".spectator_issuer_token")
         try:
@@ -258,7 +259,10 @@ class PeerManager:
             self.stop_peer(peer_id)
             raise RuntimeError("PoS peer did not start its dashboard API. Check the peer-manager logs.")
 
-        self.start_collector(room_id, {"name": name, "base_url": f"http://127.0.0.1:{port + 1000}", "token": token})
+        self.start_collector(
+            room_id,
+            {"name": name, "base_url": f"http://127.0.0.1:{port + 1000}", "token": token, "peer_id": peer_id},
+        )
 
         return managed
 
@@ -266,11 +270,24 @@ class PeerManager:
         if self.event_loop and self.event_loop.is_running():
             future = asyncio.run_coroutine_threadsafe(self._collect_events(room_id, candidate), self.event_loop)
             self.collector_futures.append(future)
+            if candidate.get("peer_id"):
+                self.collectors[candidate["peer_id"]] = future
+
+    def _collector_wanted(self, candidate):
+        """Managed peers' collectors end with the peer. Fixed (Compose) peers' never do."""
+        peer_id = candidate.get("peer_id")
+        if not peer_id:
+            return True
+        peer = self.peers.get(peer_id)
+        return peer is not None and secrets.compare_digest(peer.token, candidate["token"])
 
     async def _collect_events(self, room_id, candidate):
         parsed = urlparse(candidate["base_url"])
         ws_url = f"ws://{parsed.hostname}:{parsed.port + 1}/events?token={candidate['token']}"
-        while True:
+        # A collector that outlives its peer keeps reconnecting to that port. Ports are reused, so
+        # it would hit a *different* peer with a stale token; every attempt counts as a failed login
+        # there and locks the whole proxy out ("too many failed auth attempts").
+        while self._collector_wanted(candidate):
             try:
                 async with websockets.connect(ws_url) as upstream:
                     async for message in upstream:
@@ -278,10 +295,11 @@ class PeerManager:
                             self.record_event(room_id, json.loads(message), candidate["name"])
                         except (ValueError, TypeError):
                             continue
+                if upstream.close_code in (4401, 4429):
+                    return  # rejected (bad token / rate limited): retrying only makes it worse
             except (OSError, websockets.exceptions.WebSocketException):
-                await asyncio.sleep(2)
-            else:
-                await asyncio.sleep(2)
+                pass
+            await asyncio.sleep(2)
 
     async def monitor_rooms(self):
         while True:
@@ -395,6 +413,9 @@ class PeerManager:
 
     def _release(self, peer):
         self.peers.pop(peer.peer_id, None)
+        collector = self.collectors.pop(peer.peer_id, None)
+        if collector:
+            collector.cancel()
         if peer.port not in self._free_ports:
             self._free_ports.append(peer.port)
 
