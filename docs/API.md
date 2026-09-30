@@ -31,8 +31,9 @@ otherwise generated per process. It is printed at startup and written to `.webap
 peer manager do; auth is still required). `WEBAPI_CORS_ORIGINS` (comma separated) lists browser origins
 allowed to call the API directly; the default is localhost only.
 
-**Rate limiting** (`webapi/rate_limit.py`), shared by REST and `/events`:
-- 300 requests per minute per client IP, then `429`.
+**Rate limiting** (`webapi/rate_limit.py`):
+- REST: 300 requests per minute per client IP, then `429`. `/events` has its own limit of 30 connections per
+  minute per IP (closes with `4429`).
 - 5 failed-auth attempts within 60s blocks that IP for 5 minutes (`429` on every request during the block,
   even with the right token).
 - `POST /faucet` has its own limit: 10 requests per hour per IP.
@@ -177,7 +178,7 @@ Off by default for honest nodes, on for malicious ones. `available` is `false` o
 
 #### `POST /faucet`
 Test coins for demos: a faucet-signed mint to this node, broadcast to the mempool (confirmed in the next
-block). Amount `1..500`, default 50.
+block). Amount above 0 and at most 500, default 50.
 ```json
 // request
 { "amount": 50 }
