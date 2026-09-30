@@ -5,6 +5,7 @@ import {
   AlertTriangle,
   ArrowRight,
   Blocks,
+  ChevronLeft,
   ChevronRight,
   Clock3,
   Coins,
@@ -198,7 +199,7 @@ export function Dashboard({
       onClose: () => setWsConnected(false),
       onError: () => setWsConnected(false),
       onBlockAppended: (block) => {
-        setToast("New block appended to chain!");
+        setToast(block?.creator ? `${getNameRef.current(block.creator)} won the block and appended it to the chain` : "New block appended to chain!");
         addPacket("block", block?.creator);
         refreshAll();
       },
@@ -224,7 +225,7 @@ export function Dashboard({
       },
       onNodeSlashed: (event) => {
         setSlashed(event);
-        setToast(`MALICIOUS ACTIVITY DETECTED: Validator slashed!`);
+        setToast(`MALICIOUS ACTIVITY DETECTED: ${event.creator ? getNameRef.current(event.creator) : "a validator"} double-signed and was slashed!`);
         refreshAll();
       },
       onAttackState: (event) => setAttackEvent(event),
@@ -255,6 +256,9 @@ export function Dashboard({
     },
     [balance.public_key, peers.peers],
   );
+  // The events effect below subscribes once per connection; the ref keeps its toasts using the latest names.
+  const getNameRef = useRef(getName);
+  getNameRef.current = getName;
 
   const openView = (next: View) => {
     setView(next);
@@ -1458,6 +1462,8 @@ function Validators({
   );
 }
 
+const MEMPOOL_PAGE_SIZE = 8;
+
 function Mempool({
   mempool,
   connection,
@@ -1479,6 +1485,14 @@ function Mempool({
   const [amount, setAmount] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [page, setPage] = useState(0);
+
+  // Paged so a long mempool doesn't stretch the view; the page clamps when the pool drains after a block.
+  const total = mempool.transactions.length;
+  const pageCount = Math.max(1, Math.ceil(total / MEMPOOL_PAGE_SIZE));
+  const safePage = Math.min(page, pageCount - 1);
+  const pageStart = safePage * MEMPOOL_PAGE_SIZE;
+  const pageTransactions = mempool.transactions.slice(pageStart, pageStart + MEMPOOL_PAGE_SIZE);
 
   const handleSubmitTx = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -1516,7 +1530,27 @@ function Mempool({
           title="Pending Transactions"
           detail={`${mempool.transactions.length} transactions in mempool`}
         />
-        <TransactionTable transactions={mempool.transactions} getName={getName} onTx={onTx} />
+        <TransactionTable transactions={pageTransactions} getName={getName} onTx={onTx} />
+        {total > MEMPOOL_PAGE_SIZE && (
+          <div className="flex items-center justify-between border-t border-border px-5 py-3 text-xs text-muted-foreground">
+            <span>
+              Showing {pageStart + 1}-{pageStart + pageTransactions.length} of {total}
+            </span>
+            <div className="flex items-center gap-2">
+              <Button variant="outline" size="sm" disabled={safePage === 0} onClick={() => setPage(safePage - 1)}>
+                <ChevronLeft className="h-4 w-4" />
+                Previous
+              </Button>
+              <span>
+                Page {safePage + 1} of {pageCount}
+              </span>
+              <Button variant="outline" size="sm" disabled={safePage >= pageCount - 1} onClick={() => setPage(safePage + 1)}>
+                Next
+                <ChevronRight className="h-4 w-4" />
+              </Button>
+            </div>
+          </div>
+        )}
       </section>
 
       {!readOnly && <section className="panel self-start p-5">
