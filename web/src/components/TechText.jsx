@@ -210,7 +210,10 @@ const TechText = ({
       m = probe.measureText(s.text);
       const inkWidth = m.actualBoundingBoxLeft + m.actualBoundingBoxRight;
       const inkHeight = m.actualBoundingBoxAscent + m.actualBoundingBoxDescent;
-      const x = (s.align === 'left' ? 0 : (width - inkWidth) / 2) + m.actualBoundingBoxLeft;
+      // Left-aligned ink used to start exactly at the canvas edge, so the outline drawn around the
+      // first glyph (stroke + selection box) was clipped there. Inset it by the stroke padding.
+      const inset = s.align === 'left' ? Math.ceil(s.strokeWidth * 2 + 4) : 0;
+      const x = (s.align === 'left' ? inset : (width - inkWidth) / 2) + m.actualBoundingBoxLeft;
       const baseline = (height - inkHeight) / 2 + m.actualBoundingBoxAscent;
       const next = {
         size,

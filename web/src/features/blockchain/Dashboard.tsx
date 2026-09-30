@@ -32,6 +32,7 @@ import { CopyValue, formatTime, normKey, shortKey } from "./utils";
 import { SpectatorShare } from "./SpectatorShare";
 import { ElectionExplainer } from "./ElectionExplainer";
 import { Tutorial } from "./Tutorial";
+import SwipeToast from "@/components/SwipeToast";
 import {
   connectEventsWs,
   fetchAttackLabState,
@@ -123,7 +124,13 @@ export function Dashboard({
   const [countdown, setCountdown] = useState(0);
   const [selectedBlock, setSelectedBlock] = useState<Block | null>(null);
   const [selectedTx, setSelectedTx] = useState<Transaction | null>(null);
-  const [toast, setToast] = useState("");
+  // One toast at a time (SwipeToast). A fresh id remounts it so repeating the same message
+  // restarts its timer, and an empty message clears it.
+  const [toastState, setToastState] = useState<{ id: number; message: string } | null>(null);
+  const toastSeq = useRef(0);
+  const setToast = useCallback((message: string) => {
+    setToastState(message ? { id: ++toastSeq.current, message } : null);
+  }, []);
   const [lastUpdate, setLastUpdate] = useState(new Date());
   const [wsConnected, setWsConnected] = useState(false);
 
@@ -233,13 +240,6 @@ export function Dashboard({
     }, 1000);
     return () => window.clearInterval(timer);
   }, []);
-
-  // Toast dismissal
-  useEffect(() => {
-    if (!toast) return;
-    const timer = window.setTimeout(() => setToast(""), 3500);
-    return () => window.clearTimeout(timer);
-  }, [toast]);
 
   // Helper to map public keys to names
   const getName = useCallback(
@@ -540,13 +540,20 @@ export function Dashboard({
       <BlockDialog block={selectedBlock} onClose={() => setSelectedBlock(null)} />
       <TransactionDialog transaction={selectedTx} onClose={() => setSelectedTx(null)} />
 
-      {toast && (
-        <div
-          role="status"
-          className="fixed bottom-5 right-5 z-50 rounded-md border border-border bg-foreground px-4 py-3 text-sm text-background shadow-lg"
-        >
-          {toast}
-        </div>
+      {toastState && (
+        <SwipeToast
+          key={toastState.id}
+          open
+          title={toastState.message}
+          onClose={() => setToastState((current) => (current?.id === toastState.id ? null : current))}
+          closeButton
+          className="swipe-toast-center"
+          background="var(--card)"
+          color="var(--foreground)"
+          fuseColor="var(--primary)"
+          width={400}
+          duration={4500}
+        />
       )}
     </div>
   );
