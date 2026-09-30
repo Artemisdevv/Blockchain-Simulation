@@ -1,4 +1,4 @@
-import json, hashlib, uuid, base64, math
+import json, hashlib, uuid, base64, math, os
 from typing import List,Dict
 from datetime import datetime, timedelta
 from ecdsa import SigningKey, SECP256k1, VerifyingKey, BadSignatureError
@@ -386,7 +386,7 @@ def transaction_exists_in_block_list(blockList:List[Block], transaction_tc:Trans
                 return False
 
 def isvalidChain(blockList:List[Block]):
-    EPOCH_TIME = 60  # Add this constant or pass it as a parameter
+    EPOCH_TIME = int(os.environ.get("EPOCH_TIME", "60"))  # env override for short-epoch tests
     
     for i in range(len(blockList)):
         currBlock=blockList[i]

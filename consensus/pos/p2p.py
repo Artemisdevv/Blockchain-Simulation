@@ -16,7 +16,7 @@ import ast
 
 MAX_CONNECTIONS = 8
 MAX_OUTPUT=2**256
-EPOCH_TIME=60
+EPOCH_TIME=int(os.environ.get("EPOCH_TIME", "60")) # env override lets tests/harnesses run short epochs
 AUTO_STAKE_SETTLE_SECONDS=5
 GAS_PRICE = 0.001 # coin per gas unit
 BASE_DEPLOY_COST = 5
@@ -675,6 +675,10 @@ class Peer:
                 except BadSignatureError:
                     print("\nWrong signature\n")
                     return
+
+                # Keep the proof: the leader embeds this stake in its block, and a
+                # stake without a signature is dropped from the block's stake list.
+                stake.sign = sign
 
                 if stake.amt > Chain.instance.calc_balance(stake.staker, self.mem_pool, list(self.current_stakes)):
                     print("\nInvalid stake, staked more than available\n")
