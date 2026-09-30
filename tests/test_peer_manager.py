@@ -149,3 +149,43 @@ def test_unknown_role_is_rejected_and_listed_with_role():
     listed = client.get("/peers").json["peers"]
     assert [(p["name"], p["role"]) for p in listed] == [("m", "malicious")]
     assert client.post("/peers", json={"name": "y", "room_id": "room", "role": "admin"}).status_code == 400
+
+
+def test_stopping_a_peer_ends_its_event_collector():
+    """
+    A collector that outlived its peer kept reconnecting to the same port. Ports are reused, so it hit
+    the *next* peer there with a stale token, and each attempt counted as a failed login until the
+    peer locked the proxy out.
+    """
+    manager = _manager()
+    peer = manager.start_peer("a", "room")
+    candidate = {"name": "a", "base_url": "http://x", "token": peer.token, "peer_id": peer.peer_id}
+    assert manager._collector_wanted(candidate)
+
+    manager.stop_peer(peer.peer_id)
+    assert not manager._collector_wanted(candidate)
+
+    # The port is reused by a new peer with a new token: the old collector must not pass for it.
+    reused = manager.start_peer("b", "room")
+    assert reused.port == peer.port
+    assert not manager._collector_wanted(candidate)
+    assert manager._collector_wanted({**candidate, "peer_id": reused.peer_id, "token": reused.token})
+
+
+def test_stop_cancels_the_registered_collector_future():
+    class FakeFuture:
+        cancelled = False
+
+        def cancel(self):
+            self.cancelled = True
+
+    manager = _manager()
+    peer = manager.start_peer("a", "room")
+    future = FakeFuture()
+    manager.collectors[peer.peer_id] = future
+    manager.stop_peer(peer.peer_id)
+    assert future.cancelled and peer.peer_id not in manager.collectors
+
+
+def test_fixed_peer_collectors_are_never_stopped_by_the_peer_lifecycle():
+    assert _manager()._collector_wanted({"name": "alice", "base_url": "http://x", "token": "t"})
