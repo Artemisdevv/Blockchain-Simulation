@@ -6,7 +6,18 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd)"
 cd "$REPO_ROOT" || exit 1
 
-compose_args=(--profile demo up -d --build --wait --wait-timeout 90)
+# By default the network starts empty: people join with any name, create their own room, and other
+# nodes join that room. Pass --demo-peers for the scripted cast (Alice, Bob, Mallory and swarm
+# peers in room "demo").
+profile_args=()
+if [[ "${1:-}" == "--demo-peers" ]]; then
+  profile_args=(--profile demo)
+else
+  # Leftover demo peers from an earlier run would still be sitting in room "demo".
+  docker compose --profile demo rm -sf peer-alice peer-bob peer-mallory peer-swarm >/dev/null 2>&1 || true
+fi
+
+compose_args=(${profile_args[@]+"${profile_args[@]}"} up -d --build --wait --wait-timeout 90)
 compose_output=$(docker compose "${compose_args[@]}" 2>&1)
 compose_status=$?
 if (( compose_status != 0 )) \
@@ -92,5 +103,5 @@ if [[ "$clipboard_message" == "URL copied to clipboard." ]]; then
 fi
 printf '\033[32m================================================\033[0m\n'
 printf "Following Docker Compose logs. Press Ctrl+C to detach; containers will keep running.\n"
-docker compose --profile demo logs --follow --tail=20
+docker compose ${profile_args[@]+"${profile_args[@]}"} logs --follow --tail=20
 printf "Detached from Compose logs. Docker containers remain running.\n"

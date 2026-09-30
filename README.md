@@ -56,7 +56,9 @@ The easiest way to start the complete simulation is with the included demo launc
 .\launchers\demo.ps1
 ```
 
-The launcher builds and starts the Docker demo stack, waits for the services to become ready, starts a Cloudflare Quick Tunnel, and displays the public demo URL in a separate terminal.
+The launcher builds and starts the Docker stack, waits for the services to become ready, starts a Cloudflare Quick Tunnel, and displays the public demo URL in a separate terminal.
+
+The network starts **empty**: open the URL, join with any node name and a room ID of your choosing, and let others join the same room. To also start the scripted cast (Alice, Bob, Mallory and swarm peers in room `demo`), run `.\launchers\demo.ps1 -DemoPeers` (or `./launchers/demo.sh --demo-peers`).
 
 The generated URL can be opened with **Ctrl+Click**.
 
@@ -67,7 +69,7 @@ chmod +x launchers/demo.sh
 ./launchers/demo.sh
 ```
 
-The shell launcher starts the same demo stack and prints the temporary public Cloudflare URL in the terminal.
+The shell launcher starts the same stack (empty network; `--demo-peers` adds the scripted cast) and prints the temporary public Cloudflare URL in the terminal.
 
 > The Cloudflare Quick Tunnel does not require a Cloudflare account, API token, or persistent tunnel configuration.
 
@@ -111,7 +113,7 @@ See [Docker Setup](docs/DOCKER.md) for more details.
 | `peer-mallory` | — | Malicious peer (demo profile) |
 | `peer-swarm` | — | Additional non-staking peers (demo profile) |
 
-> **Note:** The `peer-*` services are enabled through the `demo` Compose profile, which is activated by the included demo launchers (or `docker compose --profile demo up -d`). Without it the stack starts empty and peers come from the browser.
+> **Note:** The `peer-*` services are enabled through the `demo` Compose profile, which is activated by `-DemoPeers` / `--demo-peers` on the launchers (or `docker compose --profile demo up -d`). By default the stack starts empty and peers come from the browser.
 
 ---
 

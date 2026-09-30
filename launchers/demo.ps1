@@ -1,3 +1,13 @@
+<#
+.SYNOPSIS
+    Builds and starts the stack and opens a public Cloudflare Quick Tunnel to it.
+.PARAMETER DemoPeers
+    Also start the scripted cast (Alice, Bob, Mallory and swarm peers in room "demo").
+    Without it the network starts empty: people join with any name, create their own room,
+    and other nodes join that room.
+#>
+param([switch]$DemoPeers)
+
 $ErrorActionPreference = "Stop"
 
 function Invoke-DockerComposeToHost {
@@ -95,7 +105,12 @@ Write-Host "This window only displays the URL; close it when finished." -Foregro
 Push-Location (Split-Path -Parent $PSScriptRoot)
 try {
     Write-Host "Building and starting the Docker Compose stack; waiting for services to become ready..." -ForegroundColor Cyan
-    Invoke-DockerComposeToHost -Arguments @("--profile", "demo", "up", "-d", "--build", "--wait", "--wait-timeout", "90")
+    $ProfileArgs = if ($DemoPeers) { @("--profile", "demo") } else { @() }
+    if (-not $DemoPeers) {
+        # Leftover demo peers from an earlier run would still be sitting in room "demo".
+        Invoke-DockerComposeToHost -Arguments @("--profile", "demo", "rm", "-sf", "peer-alice", "peer-bob", "peer-mallory", "peer-swarm")
+    }
+    Invoke-DockerComposeToHost -Arguments ($ProfileArgs + @("up", "-d", "--build", "--wait", "--wait-timeout", "90"))
     if ($script:DockerComposeExitCode -ne 0) {
         $reason = "ERROR: Docker Compose failed to build or start the application (exit code $script:DockerComposeExitCode)."
         if ($script:DockerComposeInvocationError) {
@@ -191,7 +206,7 @@ try {
     }
     Write-Host ""
     Write-Host "Following Docker Compose logs. Press Ctrl+C to detach; containers will keep running." -ForegroundColor Cyan
-    Invoke-DockerComposeToHost -Arguments @("--profile", "demo", "logs", "--follow", "--tail=20")
+    Invoke-DockerComposeToHost -Arguments ($ProfileArgs + @("logs", "--follow", "--tail=20"))
     Write-Host "Detached from Compose logs. Docker containers remain running." -ForegroundColor Cyan
 }
 finally {

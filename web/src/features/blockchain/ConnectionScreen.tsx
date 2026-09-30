@@ -214,7 +214,7 @@ export function ConnectionScreen({ onConnect }: { onConnect: (connection: Connec
                   onChange={(e) => {
                     setRoomId(e.target.value);
                   }}
-                  placeholder="demo"
+                  placeholder="my-room"
                 />
               </div>
 
