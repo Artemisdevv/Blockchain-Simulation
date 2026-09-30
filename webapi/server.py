@@ -16,6 +16,7 @@ wallet balances/pubkeys aren't secret in a blockchain but spending coins on
 someone's behalf is, so this isn't optional even for a demo.
 """
 import asyncio
+import math
 import os
 import secrets
 import stat
@@ -48,6 +49,12 @@ MAX_REQUESTS_PER_MINUTE = 300
 MAX_AUTH_FAILURES = 5
 AUTH_FAILURE_WINDOW_SECONDS = 60
 AUTH_BLOCK_SECONDS = 300
+
+
+def _json_body():
+    """The request's JSON object, or {} for a missing / invalid / non-object body (list, number...)."""
+    data = request.get_json(force=True, silent=True)
+    return data if isinstance(data, dict) else {}
 
 
 def _chain_hash_linkage_ok(blocks):
@@ -167,7 +174,7 @@ def create_app(peer, loop, token, limiter: RateLimiter, auth_tracker: FailedAuth
 
     @app.post("/malicious/trigger")
     def post_malicious_trigger():
-        data = request.get_json(force=True, silent=True) or {}
+        data = _json_body()
         attack_type = data.get("attack_type", "double_sign")
 
         if not Chain.instance or len(Chain.instance.chain) == 0:
@@ -286,7 +293,7 @@ def create_app(peer, loop, token, limiter: RateLimiter, auth_tracker: FailedAuth
 
     @app.post("/attack-lab/partition")
     def set_attack_partition():
-        data = request.get_json(force=True, silent=True) or {}
+        data = _json_body()
         keys = data.get("peer_keys")
         if not isinstance(keys, list) or not all(isinstance(key, str) for key in keys):
             return jsonify({"ok": False, "error": "peer_keys must be an array of public keys"}), 400
@@ -304,10 +311,10 @@ def create_app(peer, loop, token, limiter: RateLimiter, auth_tracker: FailedAuth
 
     @app.post("/attack-lab/latency")
     def set_attack_latency():
-        data = request.get_json(force=True, silent=True) or {}
+        data = _json_body()
         try:
             latency_ms = int(data.get("latency_ms"))
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
             return jsonify({"ok": False, "error": "latency_ms must be an integer"}), 400
         if latency_ms < 0 or latency_ms > 10000:
             return jsonify({"ok": False, "error": "latency_ms must be between 0 and 10000"}), 400
@@ -316,7 +323,7 @@ def create_app(peer, loop, token, limiter: RateLimiter, auth_tracker: FailedAuth
 
     @app.post("/attack-lab/censorship")
     def set_attack_censorship():
-        data = request.get_json(force=True, silent=True) or {}
+        data = _json_body()
         receiver = str(data.get("receiver", "")).strip()
         enabled = data.get("enabled")
         if not receiver or not isinstance(enabled, bool):
@@ -382,17 +389,21 @@ def create_app(peer, loop, token, limiter: RateLimiter, auth_tracker: FailedAuth
 
     @app.post("/transactions")
     def post_transaction():
-        data = request.get_json(force=True, silent=True) or {}
+        data = _json_body()
         receiver = data.get("receiver")
         amount = data.get("amount")
 
         if not receiver or amount is None:
             return jsonify({"ok": False, "error": "receiver and amount are required"}), 400
 
+        if isinstance(amount, bool):
+            return jsonify({"ok": False, "error": "amount must be a number"}), 400
         try:
             amount = float(amount)
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
             return jsonify({"ok": False, "error": "amount must be a number"}), 400
+        if not math.isfinite(amount):
+            return jsonify({"ok": False, "error": "amount must be a finite number"}), 400
         if amount <= 0:
             return jsonify({"ok": False, "error": "amount must be positive"}), 400
 
@@ -424,7 +435,7 @@ def create_app(peer, loop, token, limiter: RateLimiter, auth_tracker: FailedAuth
 
     @app.post("/stakes")
     def post_stake():
-        data = request.get_json(force=True, silent=True) or {}
+        data = _json_body()
         amount = data.get("amount")
         if amount is None:
             return jsonify({"ok": False, "error": "amount is required"}), 400
@@ -441,7 +452,7 @@ def create_app(peer, loop, token, limiter: RateLimiter, auth_tracker: FailedAuth
     def post_auto_stake():
         if not peer.staker:
             return jsonify({"ok": False, "error": "node is not a staker"}), 400
-        data = request.get_json(force=True, silent=True) or {}
+        data = _json_body()
         if not isinstance(data.get("enabled"), bool):
             return jsonify({"ok": False, "error": "enabled must be true or false"}), 400
         peer.auto_stake = data["enabled"]
@@ -458,14 +469,15 @@ def create_app(peer, loop, token, limiter: RateLimiter, auth_tracker: FailedAuth
                 "error": "Faucet rate limit exceeded: Maximum 10 faucet requests per hour."
             }), 429
 
-        data = request.get_json(force=True, silent=True) or {}
+        data = _json_body()
         amount = data.get("amount", 50)
         try:
             amount = float(amount)
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
             amount = 50.0
 
-        if amount <= 0 or amount > 500:
+        # `not (0 < amount <= 500)` also rejects NaN, which slips through `<= 0 or > 500`.
+        if not math.isfinite(amount) or not (0 < amount <= 500):
             return jsonify({"ok": False, "error": "Amount must be between 1 and 500"}), 400
 
         faucet_tx = peer.build_faucet_tx(amount)

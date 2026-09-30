@@ -448,13 +448,22 @@ class PeerManager:
             self.stop_peer(peer_id)
 
 
+def _json_body():
+    """The request's JSON object, or {} for a missing / invalid / non-object body (list, number...)."""
+    data = request.get_json(silent=True)
+    return data if isinstance(data, dict) else {}
+
+
 def create_app(manager=None):
     manager = manager or PeerManager()
     app = Flask(__name__)
+    # Every legitimate request is tiny JSON; this stops an unauthenticated caller streaming
+    # huge bodies into /peers, /spectator-links or through the /api/runtime proxy.
+    app.config["MAX_CONTENT_LENGTH"] = 64 * 1024
 
     @app.post("/peers")
     def create_peer():
-        data = request.get_json(silent=True) or {}
+        data = _json_body()
         try:
             peer = manager.start_peer(data.get("name"), data.get("room_id"), data.get("role", "honest"))
         except ValueError as exc:

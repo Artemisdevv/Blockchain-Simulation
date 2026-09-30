@@ -3,7 +3,7 @@ import argparse, json, uuid, base64
 import threading, socket, os, subprocess
 from datetime import datetime, timedelta
 from typing import Set, Dict, List, Tuple, Any
-from consensus.pos.blockchain_structures import Transaction, Stake, Block, Wallet, Chain, isvalidChain, weight_of_chain, elect_leader
+from consensus.pos.blockchain_structures import Transaction, Stake, Block, Wallet, Chain, isvalidChain, weight_of_chain, elect_leader, is_valid_amount
 from shared_blockchain_structures import FAUCET_VERIFYING_KEY
 from ipfs.ipfs import addToIpfs, download_ipfs_file_subprocess
 from smart_contract.contracts_db import SmartContractDatabase
@@ -564,8 +564,10 @@ class Peer:
             else:
                 amount = tx['payload']
 
-            if amount <= 0:
-                print("\nInvalid Transaction, amount<=0\n")
+            # Also rejects NaN / infinity / strings: `amount <= 0` alone lets NaN through and
+            # raises TypeError (dropping the connection) on a non-number.
+            if not is_valid_amount(amount):
+                print("Invalid Transaction, amount is not a positive finite number")
                 return
 
             transaction = Transaction(tx['payload'], tx['sender'], tx['receiver'], tx['id'], tx['ts'])
@@ -658,7 +660,7 @@ class Peer:
             amt = stake.amt
 
             if pid and amt:
-                if amt <= 0:
+                if not is_valid_amount(amt) or not isinstance(pid, str):
                     return
                 
                 try:
@@ -1593,8 +1595,10 @@ class Peer:
                 return {"ok": False, "error": f"stake registration period closed, time till next epoch: {time_till_reset}"}
 
         try:
-            amt=int(amt)
-        except (TypeError, ValueError):
+            if isinstance(amt, bool):
+                raise TypeError("bool is not an amount")
+            amt=int(amt)  # OverflowError for infinity, ValueError for NaN / text
+        except (TypeError, ValueError, OverflowError):
             return {"ok": False, "error": "amount must be a valid integer"}
 
         if(amt>Chain.instance.calc_balance(self.wallet.public_key_pem, self.mem_pool, list(self.current_stakes))):
