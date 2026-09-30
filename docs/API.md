@@ -240,7 +240,7 @@ reaches it through `/api/peer-setup/...`, `/api/runtime/...` and `/ws/runtime/..
 | Route | Auth | Purpose |
 |---|---|---|
 | `POST /peers` | none | Start a peer. Body `{"name", "room_id", "role"}`; `role` is `honest` (default) or `malicious`. Returns `{peer_id, name, room_id, role, token}` (201). Names: 1-32 of `A-Za-z0-9_-`, room ids up to 64. At most 9 managed peers (`503` when full); names are unique among running peers |
-| `GET /peers` | none | List managed peers `{peer_id, name, room_id, role}` (no tokens) |
+| `GET /peers` | `Bearer` token of any live peer | List the managed peers **in the caller's room** `{peer_id, name, room_id, role}` (no tokens). `403` without a valid token |
 | `DELETE /peers/<peer_id>` | `Bearer` token of any live peer **in the same room** | Stop a peer (a node can stop itself; Chaos Lab "Kill" stops a room-mate). `403` otherwise |
 | `/api/runtime/<peer_id>/<path>` | the peer's own token | Proxy to that peer's per-node API |
 | `/ws/runtime/<peer_id>/events` | `?token=` | Proxy to that peer's `/events` |

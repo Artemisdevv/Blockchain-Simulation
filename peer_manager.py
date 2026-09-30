@@ -516,11 +516,19 @@ def create_app(manager=None):
 
     @app.get("/peers")
     def list_peers():
+        # Only the caller's own room: listing every room leaked other teams' node names and
+        # offered nodes the caller is not allowed to stop (DELETE needs a token from that room).
+        auth = request.headers.get("Authorization", "")
+        supplied = auth[len("Bearer "):] if auth.startswith("Bearer ") else ""
+        room_id = manager.find_token_owner(supplied) if supplied else None
+        if not room_id:
+            return jsonify({"error": "A peer token for this room is required to list its nodes."}), 403
         with manager._lock:
             manager._reap_exited()
             peers = [
                 {"peer_id": peer.peer_id, "name": peer.name, "room_id": peer.room_id, "role": peer.role}
                 for peer in manager.peers.values()
+                if peer.room_id == room_id
             ]
         return jsonify({"peers": peers})
 

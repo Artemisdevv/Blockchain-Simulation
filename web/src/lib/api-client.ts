@@ -88,8 +88,9 @@ export interface ManagedPeerSummary {
   role?: PeerRole;
 }
 
-export async function listManagedPeers(): Promise<ManagedPeerSummary[]> {
-  const response = await fetch("/api/peer-setup/peers");
+/** The nodes in the room `peerToken` belongs to (the manager only lists the caller's own room). */
+export async function listManagedPeers(peerToken: string): Promise<ManagedPeerSummary[]> {
+  const response = await fetch("/api/peer-setup/peers", { headers: { Authorization: `Bearer ${peerToken}` } });
   if (!response.ok) throw new Error(`Failed to load managed peers (HTTP ${response.status}).`);
   const data = (await response.json()) as { peers: ManagedPeerSummary[] };
   return data.peers;

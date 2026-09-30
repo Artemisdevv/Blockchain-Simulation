@@ -122,6 +122,20 @@ def test_delete_endpoint_needs_a_token_from_the_same_room():
     assert client.delete(f"/peers/{b.peer_id}", headers=auth(b)).status_code == 404
 
 
+def test_peer_list_is_limited_to_the_callers_room():
+    manager = _manager()
+    mine = manager.start_peer("mine", "room-a")
+    manager.start_peer("teammate", "room-a")
+    manager.start_peer("stranger", "room-b")
+    client = create_app(manager)[0].test_client()
+
+    listed = client.get("/peers", headers={"Authorization": f"Bearer {mine.token}"}).json["peers"]
+    assert sorted(p["name"] for p in listed) == ["mine", "teammate"]
+
+    assert client.get("/peers").status_code == 403
+    assert client.get("/peers", headers={"Authorization": "Bearer wrong"}).status_code == 403
+
+
 def test_malicious_role_sets_env_and_auto_stakes():
     created = []
 
@@ -144,9 +158,9 @@ def test_unknown_role_is_rejected_and_listed_with_role():
     with pytest.raises(ValueError, match="Role"):
         manager.start_peer("x", "room", role="admin")
 
-    manager.start_peer("m", "room", role="malicious")
+    mal = manager.start_peer("m", "room", role="malicious")
     client = create_app(manager)[0].test_client()
-    listed = client.get("/peers").json["peers"]
+    listed = client.get("/peers", headers={"Authorization": f"Bearer {mal.token}"}).json["peers"]
     assert [(p["name"], p["role"]) for p in listed] == [("m", "malicious")]
     assert client.post("/peers", json={"name": "y", "room_id": "room", "role": "admin"}).status_code == 400
 

@@ -1729,7 +1729,7 @@ function AttackLab({
 
   useEffect(() => {
     fetchAttackLabState(connection).then(setAttackState).catch(() => {});
-    listManagedPeers().then((items) => {
+    listManagedPeers(connection.token).then((items) => {
       setManagedPeers(items);
       if (items[0]) setSelectedManagedPeer(items[0].peer_id);
     }).catch(() => setManagedPeers([]));
