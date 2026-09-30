@@ -339,3 +339,12 @@
   left: 50%;
   transform: translateX(-50%);
 }
+
+/* Match the app's cards: light surface with a hairline border, and a fuse thick enough to read
+   (the primary blue is too dark to see on a near-black toast, so the toast is a card instead). */
+.swipe-toast.swipe-toast-center {
+  --st-fuse-h: 3px;
+}
+.swipe-toast.swipe-toast-center .swipe-toast__card {
+  border: 1px solid var(--border);
+}

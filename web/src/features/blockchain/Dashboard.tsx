@@ -548,8 +548,8 @@ export function Dashboard({
           onClose={() => setToastState((current) => (current?.id === toastState.id ? null : current))}
           closeButton
           className="swipe-toast-center"
-          background="var(--foreground)"
-          color="var(--background)"
+          background="var(--card)"
+          color="var(--foreground)"
           fuseColor="var(--primary)"
           width={400}
           duration={4500}
