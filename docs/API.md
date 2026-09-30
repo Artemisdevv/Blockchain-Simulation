@@ -125,6 +125,8 @@ the one-time auto-stake faucet request.
 { "blocks_count": 4, "total_transactions": 6, "total_staked": 40, "mempool_count": 0,
   "peer_count": 3, "avg_block_time_sec": 60.0, "room_id": "demo" }
 ```
+`avg_block_time_sec` is the average number of seconds between the last 10 blocks (the genesis gap is ignored);
+it is the epoch length (60) until there are two blocks after genesis.
 
 #### `GET /invariants`
 Cheap consistency checks computed from this node's chain.
