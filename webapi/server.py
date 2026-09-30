@@ -263,7 +263,7 @@ def create_app(peer, loop, token, limiter: RateLimiter, auth_tracker: FailedAuth
                 "mempool_count": len(peer.mem_pool),
                 "peer_count": len(peer.known_peers),
                 "avg_block_time_sec": float(EPOCH_TIME),
-                "room_id": getattr(peer, "room_id", "demo")
+                "room_id": getattr(peer, "room_id", None) or "demo"
             })
 
         blocks = Chain.instance.chain
@@ -281,7 +281,7 @@ def create_app(peer, loop, token, limiter: RateLimiter, auth_tracker: FailedAuth
             "mempool_count": len(peer.mem_pool),
             "peer_count": len(peer.known_peers),
             "avg_block_time_sec": avg_block_time,
-            "room_id": getattr(peer, "room_id", "demo")
+            "room_id": getattr(peer, "room_id", None) or "demo"
         })
 
     @app.get("/peers")
