@@ -5,6 +5,7 @@ import {
   AlertTriangle,
   ArrowRight,
   Blocks,
+  ChevronLeft,
   ChevronRight,
   Clock3,
   Coins,
@@ -101,10 +102,11 @@ export function Dashboard({
   // Live "packets" for the network animation: one entry per tx / stake / block event.
   const [packets, setPackets] = useState<Packet[]>([]);
   const packetSeq = useRef(0);
-  const addPacket = useCallback((kind: PacketKind, fromKey?: string) => {
+  // toKey set: the dot travels to that one node (transfers, faucet). Unset: it fans out to every other node.
+  const addPacket = useCallback((kind: PacketKind, fromKey?: string, toKey?: string) => {
     if (!fromKey) return;
     const id = ++packetSeq.current;
-    setPackets((current) => [...current.slice(-40), { id, kind, fromKey }]);
+    setPackets((current) => [...current.slice(-40), { id, kind, fromKey, toKey }]);
     window.setTimeout(() => setPackets((current) => current.filter((p) => p.id !== id)), 2600);
   }, []);
   const [autoStake, setAutoStakeState] = useState<{ enabled: boolean; available: boolean }>({
@@ -198,13 +200,13 @@ export function Dashboard({
       onClose: () => setWsConnected(false),
       onError: () => setWsConnected(false),
       onBlockAppended: (block) => {
-        setToast("New block appended to chain!");
+        setToast(block?.creator ? `${getNameRef.current(block.creator)} won the block and appended it to the chain` : "New block appended to chain!");
         addPacket("block", block?.creator);
         refreshAll();
       },
       onTxSeen: (tx) => {
-        // Faucet mints come from "Genesis": show them arriving at the receiver instead.
-        addPacket("tx", tx.sender === "Genesis" ? tx.receiver : tx.sender);
+        // Faucet mints come from "Genesis" (drawn as a node in the middle of the graph).
+        addPacket("tx", tx.sender, tx.receiver);
       },
       onPeerDiscovered: (peer) => {
         setToast(`Peer discovered: ${peer.name || peer.host}`);
@@ -224,7 +226,7 @@ export function Dashboard({
       },
       onNodeSlashed: (event) => {
         setSlashed(event);
-        setToast(`MALICIOUS ACTIVITY DETECTED: Validator slashed!`);
+        setToast(`MALICIOUS ACTIVITY DETECTED: ${event.creator ? getNameRef.current(event.creator) : "a validator"} double-signed and was slashed!`);
         refreshAll();
       },
       onAttackState: (event) => setAttackEvent(event),
@@ -255,6 +257,9 @@ export function Dashboard({
     },
     [balance.public_key, peers.peers],
   );
+  // The events effect below subscribes once per connection; the ref keeps its toasts using the latest names.
+  const getNameRef = useRef(getName);
+  getNameRef.current = getName;
 
   const openView = (next: View) => {
     setView(next);
@@ -1034,13 +1039,60 @@ function Explorer({
           title="Confirmed Transactions"
           detail="Transactions included in verified blocks"
         />
-        <TransactionTable
-          transactions={chain.blocks.flatMap((b) => b.transactions)}
+        <PagedTransactionTable
+          transactions={chain.blocks.flatMap((b) => b.transactions).reverse()}
           getName={getName}
           onTx={onTx}
         />
       </section>
     </div>
+  );
+}
+
+const TX_PAGE_SIZE = 8;
+
+// TransactionTable with Previous/Next below it, so a long list doesn't stretch the view.
+// The page clamps when the list shrinks (e.g. the mempool drains after a block).
+function PagedTransactionTable({
+  transactions,
+  getName,
+  onTx,
+}: {
+  transactions: Transaction[];
+  getName: (pk: string) => string;
+  onTx: (t: Transaction) => void;
+}) {
+  const [page, setPage] = useState(0);
+  const total = transactions.length;
+  const pageCount = Math.max(1, Math.ceil(total / TX_PAGE_SIZE));
+  const safePage = Math.min(page, pageCount - 1);
+  const start = safePage * TX_PAGE_SIZE;
+  const shown = transactions.slice(start, start + TX_PAGE_SIZE);
+
+  return (
+    <>
+      <TransactionTable transactions={shown} getName={getName} onTx={onTx} />
+      {total > TX_PAGE_SIZE && (
+        <div className="flex items-center justify-between border-t border-border px-5 py-3 text-xs text-muted-foreground">
+          <span>
+            Showing {start + 1}-{start + shown.length} of {total}
+          </span>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" disabled={safePage === 0} onClick={() => setPage(safePage - 1)}>
+              <ChevronLeft className="h-4 w-4" />
+              Previous
+            </Button>
+            <span>
+              Page {safePage + 1} of {pageCount}
+            </span>
+            <Button variant="outline" size="sm" disabled={safePage >= pageCount - 1} onClick={() => setPage(safePage + 1)}>
+              Next
+              <ChevronRight className="h-4 w-4" />
+            </Button>
+          </div>
+        </div>
+      )}
+    </>
   );
 }
 
@@ -1103,7 +1155,11 @@ function TransactionTable({
 type Pt = { x: number; y: number };
 
 type PacketKind = "tx" | "stake" | "block";
-type Packet = { id: number; kind: PacketKind; fromKey: string };
+type Packet = { id: number; kind: PacketKind; fromKey: string; toKey?: string | undefined };
+
+const GENESIS = "Genesis";
+// The faucet is not a peer: it sits in the middle of the ring the peers are laid out on.
+const GENESIS_POS: Pt = { x: 0.5, y: 0.5 };
 
 const PACKET_STYLES: Record<PacketKind, string> = {
   tx: "h-2.5 w-2.5 rounded-full bg-primary shadow-[0_0_8px_2px] shadow-primary/60",
@@ -1157,7 +1213,7 @@ function NetworkPanel({
   const positions: Pt[] = peerList.map((peer, i) => {
     const custom = moved[keyOf(peer)];
     if (custom) return custom;
-    if (peerList.length === 1) return { x: 0.5, y: 0.5 };
+    if (peerList.length === 1) return { x: 0.5, y: 0.8 }; // keep the middle free for Genesis
     const angle = (2 * Math.PI * i) / peerList.length - Math.PI / 2;
     return { x: 0.5 + 0.34 * Math.cos(angle), y: 0.5 + 0.34 * Math.sin(angle) };
   });
@@ -1201,6 +1257,14 @@ function NetworkPanel({
               />
             ))}
           </svg>
+          <div
+            className="pointer-events-none absolute flex w-24 -translate-x-1/2 -translate-y-1/2 flex-col items-center justify-center rounded-lg border border-dashed border-warning/60 bg-card/90 p-2 text-center"
+            style={{ left: `${GENESIS_POS.x * 100}%`, top: `${GENESIS_POS.y * 100}%` }}
+          >
+            <Coins className="h-5 w-5 text-warning" />
+            <div className="mt-1 text-xs font-medium">Genesis</div>
+            <div className="text-[10px] text-muted-foreground">faucet</div>
+          </div>
           {peerList.map((peer, i) => {
             const isSelf = peer.public_key === selfPk;
             const pos = positions[i];
@@ -1237,11 +1301,21 @@ function NetworkPanel({
             );
           })}
           {packets.flatMap((packet) => {
-            const originIndex = peerList.findIndex(
-              (peer) => peer.public_key && normKey(peer.public_key) === normKey(packet.fromKey),
-            );
-            const origin = positions[originIndex];
+            const indexOf = (pk: string) =>
+              peerList.findIndex((peer) => peer.public_key && normKey(peer.public_key) === normKey(pk));
+            const fromGenesis = packet.fromKey === GENESIS;
+            const originIndex = fromGenesis ? -1 : indexOf(packet.fromKey);
+            const origin = fromGenesis ? GENESIS_POS : positions[originIndex];
             if (!origin) return [];
+            // One destination (transfer, faucet) when the receiver is a known peer, otherwise fan out.
+            const toIndex = packet.toKey ? indexOf(packet.toKey) : -1;
+            if (toIndex >= 0) {
+              const target = positions[toIndex];
+              return target && toIndex !== originIndex
+                ? [<PacketDot key={`${packet.id}-to`} from={origin} to={target} kind={packet.kind} />]
+                : [];
+            }
+            if (fromGenesis) return [];
             return peerList.flatMap((_, j) => {
               const target = positions[j];
               return j === originIndex || !target
@@ -1254,7 +1328,7 @@ function NetworkPanel({
           <span className="flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-full bg-primary" /> Transaction</span>
           <span className="flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-full bg-warning" /> Stake</span>
           <span className="flex items-center gap-2"><span className="h-3 w-3 rounded-sm bg-success" /> New block</span>
-          <span>Packets fly from the sender to every other node as they happen.</span>
+          <span>Transfers fly sender to receiver, faucet coins from Genesis to the requester; stakes and blocks go out to every other node.</span>
         </div>
       </section>
 
@@ -1516,7 +1590,7 @@ function Mempool({
           title="Pending Transactions"
           detail={`${mempool.transactions.length} transactions in mempool`}
         />
-        <TransactionTable transactions={mempool.transactions} getName={getName} onTx={onTx} />
+        <PagedTransactionTable transactions={mempool.transactions} getName={getName} onTx={onTx} />
       </section>
 
       {!readOnly && <section className="panel self-start p-5">
