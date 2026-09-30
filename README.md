@@ -166,8 +166,7 @@ are rejected) and the genesis balance (exactly 50 coins, no miner reward).
 ### Malicious node and slashing
 
 A node joined with the **malicious role** (`consensus/pos/malicious_peer.py`) double-signs whenever it is elected:
-it sends two conflicting blocks to different halves of the network. Honest nodes detect the pair, mark the block
-`is_valid: false` / `slash_creator: true`, and take the stake. Every dashboard shows the block as **Slashed**.
+it sends two conflicting blocks to different halves of the network. Honest nodes detect the pair, mark the malicious block as invalid `is_valid: false` and flag its creator for slashing `slash_creator: true`. The malicious validator's stake is then slashed, and the affected block is displayed as **Slashed** in the dashboard.
 
 ---
 
