@@ -2,6 +2,9 @@
 
 set -u
 
+# Trap SIGINT (Ctrl+C) to clean up Docker Compose
+trap 'echo "Interrupted – shutting down Docker Compose…"; docker compose down; exit 1' INT
+
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd)"
 cd "$REPO_ROOT" || exit 1
@@ -16,6 +19,8 @@ else
   # Leftover demo peers from an earlier run would still be sitting in room "demo".
   docker compose --profile demo rm -sf peer-alice peer-bob peer-mallory peer-swarm >/dev/null 2>&1 || true
 fi
+
+echo "Starting launcher.sh"
 
 compose_args=(${profile_args[@]+"${profile_args[@]}"} up -d --build --wait --wait-timeout 90)
 compose_output=$(docker compose "${compose_args[@]}" 2>&1)
