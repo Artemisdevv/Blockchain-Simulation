@@ -276,4 +276,22 @@ The frontend uses TypeScript and Vite (dev server on port 8080). Its API calls n
 
 ---
 
+## AI and Tool Usage Disclosure
+
+In line with the TatHack '26 AI Usage Policy (Rule 06):
+
+| Tool | How it was used |
+|---|---|
+| **Claude Code** | Coding assistant: implementation, tests, debugging and documentation |
+| **Codex** | Coding assistant: implementation, tests and debugging |
+| **Antigravity** | Coding assistant: implementation and debugging |
+| **Google / web search** | Looking up documentation and learning unfamiliar concepts and terms |
+
+All AI-assisted output was reviewed, tested and edited by the team, and each member can explain and defend the parts they worked on. The demo video uses the team's own voices and a real recording of the running application; no AI-generated video is used.
+
+### Base repository
+
+This project started from the organizer-provided starter repository, which shipped with intentional Proof-of-Stake bugs. The team fixed those bugs and added the signalling server, web dashboard, peer manager and the other extras described above.
+
+---
 
