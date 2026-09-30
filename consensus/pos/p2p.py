@@ -990,7 +990,19 @@ class Peer:
                                 self.save_chain_to_disk()
                     else:  # Same creator, two different blocks at one height: double-sign
                         await self.verify_and_slash(block1, block2, pos, block_list)
-                        
+                        # Slashing alone leaves this node on its own branch, and every later
+                        # block builds on the other one ("Hash Problem" forever). Also follow
+                        # the heavier chain. The pair is signed evidence, so the block at
+                        # `pos` is slashed on the other branch too (chains carry no flags).
+                        if Chain.instance.chain[pos].slash_creator:
+                            block2.is_valid = False
+                            block2.slash_creator = True
+                        if weight_of_chain(Chain.instance.chain) < weight_of_chain(block_list):
+                            Chain.instance.rewrite(block_list)
+                            print("\nCurrent chain replaced by heavier chain after double-sign\n")
+                            if self.activate_disk_save == "y":
+                                self.save_chain_to_disk()
+
                 elif weight_of_chain(Chain.instance.chain) < weight_of_chain(block_list):
                     Chain.instance.rewrite(block_list)
                     print("\nCurrent chain replaced by heavier chain\n")
