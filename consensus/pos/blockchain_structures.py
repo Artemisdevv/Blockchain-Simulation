@@ -1,4 +1,4 @@
-import json, hashlib, uuid, base64
+import json, hashlib, uuid, base64, math
 from typing import List,Dict
 from datetime import datetime, timedelta
 from ecdsa import SigningKey, SECP256k1, VerifyingKey, BadSignatureError
@@ -14,6 +14,28 @@ from shared_blockchain_structures import (
 )
 GAS_PRICE = 0.001 # coin per gas unit
 MAX_OUTPUT=2**256
+
+def is_valid_amount(value):
+    """
+        A usable coin amount: a real number (not a bool, string, NaN or infinity) above zero.
+        JSON accepts NaN / Infinity, and NaN passes every `<= 0` / `> limit` comparison, so
+        without this an attacker could mint or send "NaN coins" and poison every balance.
+    """
+    return (
+        isinstance(value, (int, float))
+        and not isinstance(value, bool)
+        and math.isfinite(value)
+        and value > 0
+    )
+
+def tx_amount(transaction):
+    """The coin amount of a transaction (last payload item for deploy/invoke), or None if malformed."""
+    try:
+        if transaction.receiver == "deploy" or transaction.receiver == "invoke":
+            return transaction.payload[-1]
+        return transaction.payload
+    except (TypeError, IndexError, KeyError):
+        return None
 
 def elect_leader(seed, stakes):
     """
@@ -241,11 +263,10 @@ class Chain(CommonChain):
                 print("Duplicate transaction(s)")
                 return False
 
-            amount = 0
-            if transaction.receiver == "deploy" or transaction.receiver == "invoke":
-                amount = transaction.payload[-1]
-            else:
-                amount = transaction.payload
+            amount = tx_amount(transaction)
+            if not is_valid_amount(amount):
+                print("Invalid transaction amount")
+                return False
 
             if transaction.sender == "Genesis":
                 # "Genesis" is just a string - trusting it alone would let
@@ -284,7 +305,7 @@ class Chain(CommonChain):
             except BadSignatureError:
                 print("\nInvalid signature on stake\n")
                 return False
-            if(stake.amt<=0 or stake.amt>Chain.instance.calc_balance(stake.staker, mem_pool, currStakes)):
+            if(not is_valid_amount(stake.amt) or stake.amt>Chain.instance.calc_balance(stake.staker, mem_pool, currStakes)):
                 return False
             currStakes.append(stake)
         return True
@@ -442,7 +463,7 @@ def isvalidChain(blockList:List[Block]):
             except BadSignatureError:
                 print("\nInvalid signature on stake\n")
                 return False
-            if(stake.amt<=0):
+            if(not is_valid_amount(stake.amt)):
                 return False
             block_stakes[stake.staker]=block_stakes.get(stake.staker, 0)+stake.amt
 
@@ -457,11 +478,9 @@ def isvalidChain(blockList:List[Block]):
                 print("Duplicate transaction(s)")
                 return False
 
-            amount = 0
-            if(transaction.receiver == "deploy" or transaction.receiver == "invoke"):
-                amount = transaction.payload[-1]
-            else:
-                amount = transaction.payload
+            amount = tx_amount(transaction)
+            if not is_valid_amount(amount):
+                return False
 
             if transaction.sender == "Genesis":
                 # See isValidBlock() for why this verifies against the
