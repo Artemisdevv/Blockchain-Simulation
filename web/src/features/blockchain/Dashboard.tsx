@@ -1038,13 +1038,60 @@ function Explorer({
           title="Confirmed Transactions"
           detail="Transactions included in verified blocks"
         />
-        <TransactionTable
-          transactions={chain.blocks.flatMap((b) => b.transactions)}
+        <PagedTransactionTable
+          transactions={chain.blocks.flatMap((b) => b.transactions).reverse()}
           getName={getName}
           onTx={onTx}
         />
       </section>
     </div>
+  );
+}
+
+const TX_PAGE_SIZE = 8;
+
+// TransactionTable with Previous/Next below it, so a long list doesn't stretch the view.
+// The page clamps when the list shrinks (e.g. the mempool drains after a block).
+function PagedTransactionTable({
+  transactions,
+  getName,
+  onTx,
+}: {
+  transactions: Transaction[];
+  getName: (pk: string) => string;
+  onTx: (t: Transaction) => void;
+}) {
+  const [page, setPage] = useState(0);
+  const total = transactions.length;
+  const pageCount = Math.max(1, Math.ceil(total / TX_PAGE_SIZE));
+  const safePage = Math.min(page, pageCount - 1);
+  const start = safePage * TX_PAGE_SIZE;
+  const shown = transactions.slice(start, start + TX_PAGE_SIZE);
+
+  return (
+    <>
+      <TransactionTable transactions={shown} getName={getName} onTx={onTx} />
+      {total > TX_PAGE_SIZE && (
+        <div className="flex items-center justify-between border-t border-border px-5 py-3 text-xs text-muted-foreground">
+          <span>
+            Showing {start + 1}-{start + shown.length} of {total}
+          </span>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" disabled={safePage === 0} onClick={() => setPage(safePage - 1)}>
+              <ChevronLeft className="h-4 w-4" />
+              Previous
+            </Button>
+            <span>
+              Page {safePage + 1} of {pageCount}
+            </span>
+            <Button variant="outline" size="sm" disabled={safePage >= pageCount - 1} onClick={() => setPage(safePage + 1)}>
+              Next
+              <ChevronRight className="h-4 w-4" />
+            </Button>
+          </div>
+        </div>
+      )}
+    </>
   );
 }
 
@@ -1462,8 +1509,6 @@ function Validators({
   );
 }
 
-const MEMPOOL_PAGE_SIZE = 8;
-
 function Mempool({
   mempool,
   connection,
@@ -1485,14 +1530,6 @@ function Mempool({
   const [amount, setAmount] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [page, setPage] = useState(0);
-
-  // Paged so a long mempool doesn't stretch the view; the page clamps when the pool drains after a block.
-  const total = mempool.transactions.length;
-  const pageCount = Math.max(1, Math.ceil(total / MEMPOOL_PAGE_SIZE));
-  const safePage = Math.min(page, pageCount - 1);
-  const pageStart = safePage * MEMPOOL_PAGE_SIZE;
-  const pageTransactions = mempool.transactions.slice(pageStart, pageStart + MEMPOOL_PAGE_SIZE);
 
   const handleSubmitTx = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -1530,27 +1567,7 @@ function Mempool({
           title="Pending Transactions"
           detail={`${mempool.transactions.length} transactions in mempool`}
         />
-        <TransactionTable transactions={pageTransactions} getName={getName} onTx={onTx} />
-        {total > MEMPOOL_PAGE_SIZE && (
-          <div className="flex items-center justify-between border-t border-border px-5 py-3 text-xs text-muted-foreground">
-            <span>
-              Showing {pageStart + 1}-{pageStart + pageTransactions.length} of {total}
-            </span>
-            <div className="flex items-center gap-2">
-              <Button variant="outline" size="sm" disabled={safePage === 0} onClick={() => setPage(safePage - 1)}>
-                <ChevronLeft className="h-4 w-4" />
-                Previous
-              </Button>
-              <span>
-                Page {safePage + 1} of {pageCount}
-              </span>
-              <Button variant="outline" size="sm" disabled={safePage >= pageCount - 1} onClick={() => setPage(safePage + 1)}>
-                Next
-                <ChevronRight className="h-4 w-4" />
-              </Button>
-            </div>
-          </div>
-        )}
+        <PagedTransactionTable transactions={mempool.transactions} getName={getName} onTx={onTx} />
       </section>
 
       {!readOnly && <section className="panel self-start p-5">
